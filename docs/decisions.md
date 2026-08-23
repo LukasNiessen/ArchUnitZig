@@ -35,7 +35,9 @@ Zig has no open base class. The planned representation is an owned tagged union 
 facts. The testing layer exhaustively formats them.
 
 Consequence: adding a fundamentally new violation shape updates the union and formatter. This is a
-deliberate Zig trade-off for exhaustive cleanup and safe value semantics.
+deliberate Zig trade-off for exhaustive cleanup and safe value semantics. Owned transfers use named
+move functions that invalidate the source; cloning allocates independent payload storage. A
+`ViolationList` with zero items is the only pass representation.
 
 ### D005 — Safe build analysis by default
 

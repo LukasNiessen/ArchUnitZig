@@ -88,6 +88,16 @@ Class-oriented parity is not a goal when the underlying concept is absent.
 Every rule is lazy and returns violations as values. User/technical errors use Zig error unions and
 diagnostic context. The testing edge turns non-empty violations into a normal `zig test` failure.
 
+`Violation` is an owned, closed tagged union of structured facts. Each domain rule adds an evidence
+shape only when it lands, and the testing formatter must then handle the new tag exhaustively. The
+kernel does not render final prose. `ViolationList` is the owned check result: zero items means pass,
+while `appendMove` makes ownership transfer explicit and clone/deinitialisation cover every payload.
+
+The first tag is `empty_test`. It records a stable machine `rule_id`, negation, and scope-pattern
+facts (selector group, glob/regex syntax, target, and exact/partial mode). This preserves OR patterns
+within one selector and AND across selector calls, so the testing layer can explain a vacuous rule
+without retaining builders or compiled regular expressions.
+
 ## Verification strategy
 
 1. Pure algorithms use hand-built graph fixtures and exhaustive unit tests.
