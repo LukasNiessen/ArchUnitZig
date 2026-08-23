@@ -34,11 +34,26 @@ pub const SyntaxDiagnostic = struct {
     location: SourceLocation,
 };
 
+/// Structural counts for declarations whose immediate parent is the Zig file root. Container
+/// members and local declarations are deliberately excluded.
+pub const TopLevelDeclarationCounts = struct {
+    total: usize = 0,
+    functions: usize = 0,
+    variables: usize = 0,
+    tests: usize = 0,
+    other: usize = 0,
+
+    pub fn eql(self: TopLevelDeclarationCounts, other: TopLevelDeclarationCounts) bool {
+        return std.meta.eql(self, other);
+    }
+};
+
 /// Owned parse output. Call `deinit` with the allocator passed to `parseSource`.
 pub const ParseResult = struct {
     source_path: []u8,
     references: std.ArrayList(DependencyReference) = .empty,
     diagnostics: std.ArrayList(SyntaxDiagnostic) = .empty,
+    top_level_declarations: ?TopLevelDeclarationCounts = null,
 
     pub fn deinit(self: *ParseResult, allocator: Allocator) void {
         allocator.free(self.source_path);
@@ -78,6 +93,8 @@ pub fn parseSource(
         };
         return result;
     }
+
+    result.top_level_declarations = countTopLevelDeclarations(&tree);
 
     var ignore_directives = try ignore_directive.parseIgnoreDirectives(
         allocator,
@@ -160,6 +177,17 @@ pub fn parseSource(
     return result;
 }
 
+fn countTopLevelDeclarations(tree: *const std.zig.Ast) TopLevelDeclarationCounts {
+    var result = TopLevelDeclarationCounts{ .total = tree.rootDecls().len };
+    for (tree.rootDecls()) |declaration| switch (tree.nodeTag(declaration)) {
+        .fn_decl, .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi => result.functions += 1,
+        .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => result.variables += 1,
+        .test_decl => result.tests += 1,
+        else => result.other += 1,
+    };
+    return result;
+}
+
 fn importKindForTarget(target: []const u8) ImportKind {
     if (std.mem.eql(u8, target, "std")) return .standard_library;
     if (std.mem.eql(u8, target, "builtin")) return .builtin_module;
@@ -238,6 +266,28 @@ test "extracts imports across Zig constructs and decodes escaped literals" {
     try std.testing.expectEqual(@as(usize, 1), result.references.items[0].location.line);
 }
 
+test "counts only declarations at the Zig file root" {
+    const source: [:0]const u8 =
+        \\const Service = struct {
+        \\    fn nested() void {}
+        \\};
+        \\pub fn run() void {}
+        \\test "root test" {}
+        \\comptime {}
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/service.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    const counts = result.top_level_declarations.?;
+    try std.testing.expectEqual(@as(usize, 4), counts.total);
+    try std.testing.expectEqual(@as(usize, 1), counts.functions);
+    try std.testing.expectEqual(@as(usize, 1), counts.variables);
+    try std.testing.expectEqual(@as(usize, 1), counts.tests);
+    try std.testing.expectEqual(@as(usize, 1), counts.other);
+}
+
 test "extracts embedded resources and C includes only inside cImport" {
     const source: [:0]const u8 =
         \\const data = @embedFile("assets/schema.json");
@@ -312,6 +362,7 @@ test "syntax errors follow strictness policy" {
     try std.testing.expectEqual(@as(usize, 0), permissive.references.items.len);
     try std.testing.expectEqual(@as(usize, 1), permissive.diagnostics.items.len);
     try std.testing.expectEqual(DiagnosticKind.syntax_error, permissive.diagnostics.items[0].kind);
+    try std.testing.expectEqual(@as(?TopLevelDeclarationCounts, null), permissive.top_level_declarations);
 }
 
 test "non-literal dependency operands follow strictness policy" {

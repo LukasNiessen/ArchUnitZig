@@ -6,6 +6,7 @@ pub const FilesDependOnBuilder = @import("files/fluentapi/files.zig").FilesDepen
 pub const FilesDependOn = @import("files/fluentapi/files.zig").FilesDependOn;
 pub const FilesExternalModuleBuilder = @import("files/fluentapi/files.zig").FilesExternalModuleBuilder;
 pub const FilesExternalModules = @import("files/fluentapi/files.zig").FilesExternalModules;
+pub const FilesAdhereTo = @import("files/fluentapi/files.zig").FilesAdhereTo;
 pub const FilesShould = @import("files/fluentapi/files.zig").FilesShould;
 pub const FilesShouldNot = @import("files/fluentapi/files.zig").FilesShouldNot;
 pub const ProjectOptions = @import("files/fluentapi/files.zig").ProjectOptions;
@@ -19,10 +20,16 @@ pub const ExternalModuleCategory = @import("files/assertion/depend_on_external_m
 pub const ExternalModuleCategories = @import("files/assertion/depend_on_external_modules.zig").ExternalModuleCategories;
 pub const defaultExternalModuleCategories = @import("files/assertion/depend_on_external_modules.zig").defaultExternalModuleCategories;
 pub const gatherExternalModuleDependencyViolations = @import("files/assertion/depend_on_external_modules.zig").gatherExternalModuleDependencyViolations;
+pub const CustomFilePredicate = @import("files/assertion/custom_file_condition.zig").CustomFilePredicate;
+pub const gatherCustomFileViolations = @import("files/assertion/custom_file_condition.zig").gatherCustomFileViolations;
+pub const FileInfo = @import("files/extraction/file_info.zig").FileInfo;
+pub const ImportSummary = @import("files/extraction/file_info.zig").ImportSummary;
 
 test {
     _ = @import("files/assertion/matching_files.zig");
     _ = @import("files/assertion/depend_on_files.zig");
     _ = @import("files/assertion/depend_on_external_modules.zig");
+    _ = @import("files/assertion/custom_file_condition.zig");
+    _ = @import("files/extraction/file_info.zig");
     _ = @import("files/fluentapi/files.zig");
 }

@@ -493,3 +493,33 @@ edge evidence, never from names such as `std` or file extensions.
 Consequence: policies can be broad by default without conflating fundamentally different Zig
 dependency mechanisms, explicit opt-ins remain reviewable in fluent rules, and reporters can explain
 whether a violation was a package, unresolved alias, compiler module, header, or resource.
+
+### D029 — Custom file predicates receive one borrowed byte-safe view
+
+`adhereTo(predicate, description)` is available from both file mood stages. The predicate type is a
+function pointer taking the per-check allocator and a `FileInfo`, and returning `anyerror!bool`. A
+plain boolean is evaluated through `Mood.holds`; any callback error propagates unchanged from
+`check` and never becomes architecture disagreement data. Requiring an error-union return keeps one
+stable function-pointer type while making the failure capability explicit at every callback.
+
+`FileInfo` is a borrowed view with project-relative path, stem, dot-prefixed extension, directory,
+raw source bytes, non-blank byte-line count, import total/counts/kinds, and optional top-level Zig
+declaration counts split into functions, variables, tests, and other root declarations. Counts come
+from Zig 0.16's AST and dependency parser rather than regular expressions. Invalid syntax and
+arbitrary bytes remain observable; their declaration summary is `null` and import summary empty.
+ZON files likewise expose bytes and path facts without pretending they have Zig declarations.
+
+The terminal locates and enumerates the project with the normal exclusions, applies subject
+selectors, then reads and evaluates one selected file at a time. It intentionally does not require a
+dependency graph: graph extraction under strict syntax policy would reject the very binary or legacy
+source bytes this escape hatch must be able to inspect. Each callback view is valid only until that
+call returns and must not be retained. The check allocator may be used for temporary callback work.
+
+On disagreement, `custom_file` owns the source path, user description, mood, byte and non-blank-line
+counts, import summary, and optional declaration summary. It never copies source bytes into the
+result. The description is validated as non-blank and copied when the terminal is built. Empty
+subject selection uses the shared `EmptyTestViolation` contract before any callback is invoked.
+
+Consequence: project-specific policies remain idiomatic `zig test` code, can safely inspect any file
+bytes and allocate temporary state, report stable structured evidence, and cannot accidentally turn
+callback failures or vacuous selections into passing architecture checks.
