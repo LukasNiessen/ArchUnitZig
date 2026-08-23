@@ -358,10 +358,14 @@ fn finish(
     errdefer allocator.free(owned_heading);
     const details = try output.toOwnedSlice();
     errdefer allocator.free(details);
+    var key_output: std.Io.Writer.Allocating = .init(allocator);
+    defer key_output.deinit();
+    key_output.writer.print("{s}:", .{kind}) catch return error.OutOfMemory;
+    writePath(&key_output.writer, primary) catch return error.OutOfMemory;
     return .{
         .heading = owned_heading,
         .details = details,
-        .sort_key = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ kind, primary }),
+        .sort_key = try key_output.toOwnedSlice(),
     };
 }
 
@@ -395,6 +399,7 @@ test "matching formatter normalizes Windows paths and owns rule prose" {
     defer formatted.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("File pattern violation", formatted.heading);
+    try std.testing.expectEqualStrings("matching:src/orders/order.zig", formatted.sort_key);
     try std.testing.expectEqualStrings(
         "Rule: project files should have name *_service.zig\n" ++
             "File: src/orders/order.zig:1:1\n" ++
