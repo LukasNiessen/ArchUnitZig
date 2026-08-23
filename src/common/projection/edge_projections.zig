@@ -102,6 +102,7 @@ test "Zig import kinds preserve the shared internal external meaning" {
     const cases = [_]Case{
         .{ .target = "src/model.zig", .external = false, .kind = .zig_file },
         .{ .target = "src/root.zig", .external = false, .kind = .root_module },
+        .{ .target = "root", .external = true, .kind = .root_module },
         .{ .target = "assets/schema.json", .external = false, .kind = .embedded_file },
         .{ .target = "missing/schema.json", .external = true, .kind = .embedded_file },
         .{ .target = "unresolved_package", .external = true, .kind = .named_module },
@@ -120,11 +121,11 @@ test "Zig import kinds preserve the shared internal external meaning" {
 }
 
 test "factories have no ambient state and borrow normalized raw identifiers" {
-    const internal = perInternalEdge();
-    const external = perExternalEdge();
-    try std.testing.expect(internal.context == null);
-    try std.testing.expect(external.context == null);
+    for ([_]MapFunction{ perEdge(), perInternalEdge(), perExternalEdge(), identity() }) |mapper| {
+        try std.testing.expect(mapper.context == null);
+    }
 
+    const internal = perInternalEdge();
     var edge = try makeEdge(
         "src\\api\\handler.zig",
         "src\\domain\\model.zig",

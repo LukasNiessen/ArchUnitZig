@@ -173,6 +173,12 @@ source's outgoing evidence stays visible; opting in creates the external target 
 evidence. Owned `ProjectedCycle` values require a closed ordered edge path. Issue #18 supplies cycle
 discovery over these values; the ownership model does not depend on a particular algorithm.
 
+The standard `perEdge`, `perInternalEdge`, and `perExternalEdge` mapping factories drop raw self-edges;
+`identity` retains them deliberately. Internal/external factories inspect only the graph's canonical
+`external` fact. Zig import kinds remain orthogonal evidence: resolved `root` and embedded resources
+may be internal, while unresolved `root`, missing resources, compiler modules, packages, and C headers
+may be external without changing the shared projection vocabulary.
+
 ## Rules and reports
 
 The first user-facing release prioritises file rules, named layers, and graph reports. Slices follow
