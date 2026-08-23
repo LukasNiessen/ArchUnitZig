@@ -282,6 +282,28 @@ Consequence: compatibility exceptions stay visible beside the exact source depen
 one ignored occurrence cannot erase an unignored occurrence elsewhere, and malformed annotations
 cannot silently weaken architecture checks.
 
+### D021 — Projections own evidence and mapper results are borrowed
+
+`MappedEdge` is a borrowed pair of non-empty labels returned by a type-erased `MapFunction`. The hook
+borrows an optional typed context and returns null to drop an edge. `projectEdges` clones a successful
+mapping before the next hook call, so stateless factories allocate nothing and contextual mappers may
+return slices backed by their context or the current raw edge.
+
+`ProjectedEdge` owns its labels and a non-empty collection of deep-cloned raw edges. Equal mapped
+label pairs aggregate, then projected pairs and raw evidence are sorted lexically. `ProjectedNode`
+also owns cloned incoming/outgoing evidence. Raw self-edges create nodes but are never reported as
+dependencies; external target nodes are opt-in without hiding the source's outgoing external edge.
+All outputs survive destruction of the input graph.
+
+`ProjectedCycle` owns a non-empty closed sequence of cloned projected edges; discontinuous paths are
+rejected. The container lands before its producer so issue #18 can implement Tarjan/Johnson without
+changing ownership or violation evidence. Projection performs no filesystem access and uses only the
+allocator supplied for that call.
+
+Consequence: file, layer, and slice views can share one projection kernel without dangling graph
+pointers or language-specific relabelling state. Deterministic owned results cost additional edge
+clones, a deliberate trade-off for safe rule results and diagnostics.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
