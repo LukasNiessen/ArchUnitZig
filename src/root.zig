@@ -8,6 +8,7 @@ const common_error = @import("common/error.zig");
 const extraction = @import("common/extraction.zig");
 const file_rules = @import("files.zig");
 const fluentapi = @import("common/fluentapi.zig");
+const graph_reports = @import("graph.zig");
 const matching = @import("common/matching.zig");
 const layer_rules = @import("layers.zig");
 const projection = @import("common/projection.zig");
@@ -55,6 +56,19 @@ pub const FilesAdhereTo = file_rules.FilesAdhereTo;
 pub const FilesShould = file_rules.FilesShould;
 pub const FilesShouldNot = file_rules.FilesShouldNot;
 pub const Graph = extraction.Graph;
+pub const GraphReportEdge = graph_reports.GraphReportEdge;
+pub const GraphReportNode = graph_reports.GraphReportNode;
+pub const GraphReportSnapshot = graph_reports.GraphReportSnapshot;
+pub const GraphReportSummary = graph_reports.GraphReportSummary;
+pub const CollapseQuery = graph_reports.CollapseQuery;
+pub const FocusQuery = graph_reports.FocusQuery;
+pub const GraphQueryOptions = graph_reports.GraphQueryOptions;
+pub const PatternCollapse = graph_reports.PatternCollapse;
+pub const GraphNodeSelection = graph_reports.NodeSelection;
+pub const GraphSnapshotError = graph_reports.GraphSnapshotError;
+pub const GraphBuilderError = graph_reports.GraphBuilderError;
+pub const ProjectGraphBuilder = graph_reports.ProjectGraphBuilder;
+pub const ProjectGraphOptions = graph_reports.ProjectGraphOptions;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
 pub const ImportSummary = extraction.ImportSummary;
@@ -164,6 +178,10 @@ pub const perEdge = projection.perEdge;
 pub const perExternalEdge = projection.perExternalEdge;
 pub const perInternalEdge = projection.perInternalEdge;
 pub const projectFiles = file_rules.projectFiles;
+pub const selectGraphNodes = graph_reports.selectGraphNodes;
+pub const createGraphSnapshot = graph_reports.createGraphSnapshot;
+pub const dependencyGraph = graph_reports.dependencyGraph;
+pub const projectGraph = graph_reports.projectGraph;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
@@ -208,6 +226,7 @@ test {
     _ = @import("common/matching.zig");
     _ = @import("common/projection.zig");
     _ = @import("files.zig");
+    _ = @import("graph.zig");
     _ = @import("layers.zig");
     _ = @import("testing.zig");
 }
