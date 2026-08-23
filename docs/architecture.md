@@ -63,7 +63,9 @@ independent path and location storage.
 `Pattern` distinguishes default glob syntax from the explicit regular-expression escape hatch.
 Globs are anchored: `*` stays in one path segment, `**` crosses segments, `?` matches one character,
 and `[...]` defines a character class. Both user patterns and candidates normalise `\\` separators
-to `/`; matching remains case-sensitive.
+to `/`; matching remains case-sensitive. Glob filters therefore record exact whole-target matching,
+while explicit regular expressions use partial matching and can opt into whole-target behavior with
+their own anchors.
 
 The selected regex engine operates on Unicode scalar values. Consequently, glob `?` and character
 classes match one Unicode scalar, which may occupy several UTF-8 bytes. Identifiers remain ordinary
@@ -215,6 +217,12 @@ of selected files. Both endpoints of an edge must be selected; the rule never co
 through an unselected file. External and synthetic self-edges cannot form file cycles. Each
 elementary cycle is one `cycle` violation whose ordered path owns projected edges and underlying raw
 imports, including locations. Cycle-path prose belongs to `testing`, not the assertion payload.
+
+`haveName`, `beInFolder`, and `beInPath` are self-contained predicates in both moods. They share one
+terminal and one pure gatherer; only the filter target changes between filename, directory portion,
+and complete project-relative path. A `matching` violation owns the selected path, original pattern
+expression and syntax, target, exact/partial mode, and mood. Subject selectors remain separate and
+continue to use OR within one call and AND across calls.
 
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
 `std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging

@@ -504,7 +504,7 @@ pub const FilesHaveNoCycles = struct {
     pub fn description(self: *const FilesHaveNoCycles, allocator: Allocator) Allocator.Error![]u8 {
         const prefix = try self.rule.description(allocator);
         defer allocator.free(prefix);
-        return std.fmt.allocPrint(allocator, "{s}, have no cycles", .{prefix});
+        return std.fmt.allocPrint(allocator, "{s} have no cycles", .{prefix});
     }
 
     pub fn check(self: *const FilesHaveNoCycles, options: CheckOptions) anyerror!assertion.ViolationList {
@@ -581,7 +581,7 @@ pub const FilesMatchPattern = struct {
         defer allocator.free(prefix);
         var output: std.Io.Writer.Allocating = .init(allocator);
         defer output.deinit();
-        output.writer.print("{s}, {s} ", .{ prefix, predicatePhrase(self.predicate.evidence.target) }) catch
+        output.writer.print("{s} {s} ", .{ prefix, predicatePhrase(self.predicate.evidence.target) }) catch
             return error.OutOfMemory;
         if (self.predicate.evidence.syntax == .regex) {
             output.writer.writeAll("regex ") catch return error.OutOfMemory;
@@ -1085,7 +1085,7 @@ test "matching predicate construction owns patterns and rejects invalid expressi
     const description = try terminal.description(std.testing.allocator);
     defer std.testing.allocator.free(description);
 
-    try std.testing.expectEqualStrings("project files, should, have name \"*.zig\"", description);
+    try std.testing.expectEqualStrings("project files, should have name \"*.zig\"", description);
     try std.testing.expectError(error.InvalidPattern, positive.haveName(.{ .regex = "(" }));
 }
 
