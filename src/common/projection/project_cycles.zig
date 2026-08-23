@@ -305,6 +305,54 @@ test "duplicate projected pairs aggregate distinct raw evidence once" {
     try std.testing.expectEqualStrings("src/second.zig", forward.evidence()[1].source);
 }
 
+test "overlapping and disconnected cycles are canonical and input-order independent" {
+    const fixture = [_][2][]const u8{
+        .{ "c", "b" }, .{ "e", "d" }, .{ "a", "c" }, .{ "b", "a" },
+        .{ "d", "e" }, .{ "c", "a" }, .{ "a", "b" }, .{ "b", "c" },
+    };
+    var forward: ProjectedEdges = .{};
+    defer forward.deinit(std.testing.allocator);
+    var reversed: ProjectedEdges = .{};
+    defer reversed.deinit(std.testing.allocator);
+    for (fixture) |pair| try appendLabelEdge(std.testing.allocator, &forward, pair);
+    var index = fixture.len;
+    while (index > 0) {
+        index -= 1;
+        try appendLabelEdge(std.testing.allocator, &reversed, fixture[index]);
+    }
+
+    var forward_cycles = try projectCycles(std.testing.allocator, forward.items());
+    defer forward_cycles.deinit(std.testing.allocator);
+    var reversed_cycles = try projectCycles(std.testing.allocator, reversed.items());
+    defer reversed_cycles.deinit(std.testing.allocator);
+
+    const expected = [_][]const []const u8{
+        &.{ "a", "b" },
+        &.{ "a", "b", "c" },
+        &.{ "a", "c" },
+        &.{ "a", "c", "b" },
+        &.{ "b", "c" },
+        &.{ "d", "e" },
+    };
+    try std.testing.expectEqual(expected.len, forward_cycles.len());
+    try std.testing.expectEqual(forward_cycles.len(), reversed_cycles.len());
+    for (expected, forward_cycles.items(), reversed_cycles.items()) |wanted, actual, reordered| {
+        try expectCycleSources(wanted, actual.items());
+        try expectCycleSources(wanted, reordered.items());
+    }
+}
+
+test "cycle projection rejects projected dependencies without evidence" {
+    const malformed = ProjectedEdge{
+        .source_label = "a",
+        .target_label = "b",
+    };
+    try std.testing.expectError(
+        error.EmptyProjectedEvidence,
+        projectCycles(std.testing.allocator, &.{malformed}),
+    );
+}
+
 test "internal cycle projection excludes external graph dependencies" {
     var graph: Graph = .{};
     defer graph.deinit(std.testing.allocator);
@@ -335,6 +383,28 @@ test "internal cycle projection excludes external graph dependencies" {
     for (cycles.items()[0].items()) |edge| for (edge.evidence()) |raw| {
         try std.testing.expect(!raw.external);
     };
+}
+
+fn appendLabelEdge(
+    allocator: Allocator,
+    edges: *ProjectedEdges,
+    pair: [2][]const u8,
+) !void {
+    try appendProjected(allocator, edges, try makeProjectedEdge(
+        allocator,
+        pair[0],
+        pair[1],
+        pair[0],
+        pair[1],
+        false,
+    ));
+}
+
+fn expectCycleSources(wanted: []const []const u8, actual: []const ProjectedEdge) !void {
+    try std.testing.expectEqual(wanted.len, actual.len);
+    for (wanted, actual) |label, edge| {
+        try std.testing.expectEqualStrings(label, edge.source_label);
+    }
 }
 
 fn exerciseAllocationFailures(allocator: Allocator) !void {
