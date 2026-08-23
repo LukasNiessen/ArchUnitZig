@@ -130,6 +130,7 @@ pub const ViolationFactory = testing_support.ViolationFactory;
 pub const ResultFactory = testing_support.ResultFactory;
 pub const ResultOptions = testing_support.ResultOptions;
 pub const TestResult = testing_support.TestResult;
+pub const ViolationGroup = testing_support.ViolationGroup;
 pub const gatherMatchingFileViolations = file_rules.gatherMatchingFileViolations;
 pub const gatherFileDependencyViolations = file_rules.gatherFileDependencyViolations;
 pub const gatherCustomFileViolations = file_rules.gatherCustomFileViolations;

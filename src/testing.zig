@@ -6,6 +6,7 @@ pub const ViolationFactory = @import("testing/violation_factory.zig").ViolationF
 pub const ResultFactory = @import("testing/result_factory.zig").ResultFactory;
 pub const ResultOptions = @import("testing/result_factory.zig").ResultOptions;
 pub const TestResult = @import("testing/result_factory.zig").TestResult;
+pub const ViolationGroup = @import("testing/result_factory.zig").ViolationGroup;
 
 test {
     _ = @import("testing/color.zig");
