@@ -19,10 +19,13 @@ pub const ExternalModuleCategory = @import("files/assertion/depend_on_external_m
 pub const ExternalModuleCategories = @import("files/assertion/depend_on_external_modules.zig").ExternalModuleCategories;
 pub const defaultExternalModuleCategories = @import("files/assertion/depend_on_external_modules.zig").defaultExternalModuleCategories;
 pub const gatherExternalModuleDependencyViolations = @import("files/assertion/depend_on_external_modules.zig").gatherExternalModuleDependencyViolations;
+pub const FileInfo = @import("files/extraction/file_info.zig").FileInfo;
+pub const ImportSummary = @import("files/extraction/file_info.zig").ImportSummary;
 
 test {
     _ = @import("files/assertion/matching_files.zig");
     _ = @import("files/assertion/depend_on_files.zig");
     _ = @import("files/assertion/depend_on_external_modules.zig");
+    _ = @import("files/extraction/file_info.zig");
     _ = @import("files/fluentapi/files.zig");
 }

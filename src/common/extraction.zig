@@ -39,6 +39,7 @@ pub const ResolvedReference = @import("extraction/relative_resolver.zig").Resolv
 pub const SourceLocation = @import("extraction/source_parser.zig").SourceLocation;
 pub const Strictness = @import("extraction/source_parser.zig").Strictness;
 pub const SyntaxDiagnostic = @import("extraction/source_parser.zig").SyntaxDiagnostic;
+pub const TopLevelDeclarationCounts = @import("extraction/source_parser.zig").TopLevelDeclarationCounts;
 pub const parseSource = @import("extraction/source_parser.zig").parseSource;
 pub const normalizeGraph = @import("extraction/graph_normalizer.zig").normalizeGraph;
 pub const resolveRelativeReference = @import("extraction/relative_resolver.zig").resolveRelativeReference;
