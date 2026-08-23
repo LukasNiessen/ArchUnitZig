@@ -14,6 +14,7 @@ pub const ArchUnitError = common_error.ArchUnitError;
 pub const Diagnostic = common_error.Diagnostic;
 pub const DiagnosticCode = common_error.DiagnosticCode;
 pub const EmptyTestViolation = assertion.EmptyTestViolation;
+pub const EnumerationOptions = extraction.EnumerationOptions;
 pub const ErrorCategory = common_error.ErrorCategory;
 pub const ErrorContext = common_error.ErrorContext;
 pub const Graph = extraction.Graph;
@@ -39,6 +40,7 @@ pub const UserCode = common_error.UserCode;
 pub const UserError = common_error.UserError;
 pub const RegexFactory = matching.RegexFactory;
 pub const ScopePattern = assertion.ScopePattern;
+pub const SourceFiles = extraction.SourceFiles;
 pub const Violation = assertion.Violation;
 pub const ViolationList = assertion.ViolationList;
 pub const matchesAny = matching.matchesAny;
@@ -46,6 +48,7 @@ pub const matchesSelectors = matching.matchesSelectors;
 pub const checkAll = fluentapi.checkAll;
 pub const categoryOfError = common_error.categoryOf;
 pub const locateProject = extraction.locateProject;
+pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
