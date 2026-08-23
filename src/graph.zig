@@ -16,6 +16,7 @@ pub const NodeSelection = node_selection.NodeSelection;
 pub const selectGraphNodes = node_selection.selectNodes;
 
 test {
+    _ = @import("graph/projection/collapse.zig");
     _ = @import("graph/projection/node_selection.zig");
     _ = @import("graph/projection/query_options.zig");
     _ = @import("graph/projection/report.zig");
