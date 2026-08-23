@@ -224,6 +224,14 @@ and complete project-relative path. A `matching` violation owns the selected pat
 expression and syntax, target, exact/partial mode, and mood. Subject selectors remain separate and
 continue to use OR within one call and AND across calls.
 
+`dependOnFiles()` exists in both moods and begins a separate object-selector stage. The first object
+selector completes a terminal; later object selectors remain chainable and use AND, while patterns
+within one selector use OR. The rule evaluates only direct internal non-self edges. Positive mood is
+an allowlist for every direct dependency of a selected subject; negative mood is a blocklist.
+Subjects are Zig nodes, while object candidates also include internal edge targets such as ZON and
+embedded files. A `file_dependency` violation groups owned projected target edges by source and
+therefore retains every concrete import kind and location.
+
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
 `std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging
 configuration, and the centralized extraction options. Their slices are borrowed only for the call;
@@ -246,7 +254,8 @@ testing/reporting layer. Architecture disagreement stays outside both sets as vi
 1. Pure algorithms use hand-built graph fixtures and exhaustive unit tests.
 2. Extraction uses focused syntax/path fixtures, including malformed and multi-root projects.
 3. Every terminal has a public-API integration test against a real Zig project.
-4. End-to-end fixtures include clean and intentionally violating twins.
+4. End-to-end fixtures include clean and intentionally violating twins plus explicit module-alias
+   and non-Zig dependency targets.
 5. `std.testing.allocator` detects leaks on owned paths, AST-derived data, violations, and reports.
 6. Golden diagnostics/renderers are deterministic and tested with hostile escaping input.
 7. Dogfood rules protect this repository's module boundaries and include negative proof tests.

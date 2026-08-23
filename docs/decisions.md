@@ -430,3 +430,33 @@ work, while returned violations survive terminal, graph, and cache destruction.
 Consequence: the three predicates cannot drift into subtly different matching behavior, both moods
 share one assertion path, Windows and POSIX spellings agree, and testing/reporting layers receive
 enough structured evidence to explain either a required non-match or a forbidden match.
+
+### D027 — File dependencies are direct, target-complete, and grouped by source
+
+`dependOnFiles()` exists on both mood stages and returns a non-checkable object builder. Its first
+`withName`, `inFolder`, `inPath`, or `inFile` call creates a terminal. Further object selectors clone
+the existing terminal and append an AND condition; alternatives within one call retain OR semantics.
+The subject scope and object scope are independent owned values, so either can outlive the builder
+from which it was branched.
+
+The rule projects only internal non-self graph edges. In positive mood the selected object set is an
+allowlist: every direct dependency from a selected subject must target it. In negative mood it is a
+blocklist: no direct dependency from a selected subject may target it. Reachability is deliberately
+not traversed. A future transitive modifier must be explicit because silently following imports
+changes both performance and the meaning of existing rules.
+
+Subject selection uses normalized Zig self-nodes. Object selection uses the union of those nodes and
+all concrete internal edge targets. This distinction is required in Zig because a ZON file or
+embedded resource can be a real internal dependency without receiving a synthetic source self-edge.
+External targets never enter the candidate set. Explicit module mappings may promote a named alias
+to its local Zig root before selection; `build.zig` still is not executed.
+
+Subject and object selections are guarded independently. Stable rule ids ending in `.subject` or
+`.object` identify which side matched nothing, and `allow_empty_tests` is the sole opt-in to a
+vacuous pass. The pure gatherer groups all disagreeing target edges under one source. Each
+`file_dependency` violation owns those projected edges and their concrete raw imports, kinds, and
+locations, while storing only the shared mood fact and no rendered prose.
+
+Consequence: direct allowlists and blocklists share one `Mood.holds` decision, ZON/resources remain
+selectable objects, multiple bad imports from one source render coherently, and rule results survive
+destruction of the graph, selectors, terminal, and cache.
