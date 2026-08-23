@@ -218,7 +218,7 @@ fn formatCycle(
         writePath(&output.writer, edge.target_label) catch return error.OutOfMemory;
     }
     output.writer.writeAll("\nImports:") catch return error.OutOfMemory;
-    for (edges) |edge| try writeProjectedEdge(&output.writer, edge, false);
+    for (edges) |edge| try writeProjectedEdge(allocator, &output.writer, edge, false);
     return finish(allocator, "Circular dependency detected", "cycle", edges[0].source_label, &output);
 }
 
@@ -228,54 +228,83 @@ fn writeProjectedEdges(
     edges: []const projection.ProjectedEdge,
     include_classification: bool,
 ) Allocator.Error!void {
-    const pointers = try allocator.alloc(*const projection.ProjectedEdge, edges.len);
-    defer allocator.free(pointers);
-    for (edges, 0..) |*edge, index| pointers[index] = edge;
-    std.mem.sort(*const projection.ProjectedEdge, pointers, {}, struct {
-        fn lessThan(_: void, left: *const projection.ProjectedEdge, right: *const projection.ProjectedEdge) bool {
-            const source_order = std.mem.order(u8, left.source_label, right.source_label);
-            if (source_order != .eq) return source_order == .lt;
-            return std.mem.order(u8, left.target_label, right.target_label) == .lt;
-        }
-    }.lessThan);
-    for (pointers) |edge| try writeProjectedEdge(writer, edge.*, include_classification);
+    var lines: std.ArrayList([]u8) = .empty;
+    defer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+    for (edges) |edge| try appendProjectedEdgeLines(allocator, &lines, edge, include_classification);
+    std.mem.sort([]u8, lines.items, {}, lineLessThan);
+    writeImportLines(writer, lines.items) catch return error.OutOfMemory;
 }
 
 fn writeProjectedEdge(
+    allocator: Allocator,
     writer: *std.Io.Writer,
+    edge: projection.ProjectedEdge,
+    include_classification: bool,
+) Allocator.Error!void {
+    var lines: std.ArrayList([]u8) = .empty;
+    defer {
+        for (lines.items) |line| allocator.free(line);
+        lines.deinit(allocator);
+    }
+    try appendProjectedEdgeLines(allocator, &lines, edge, include_classification);
+    std.mem.sort([]u8, lines.items, {}, lineLessThan);
+    writeImportLines(writer, lines.items) catch return error.OutOfMemory;
+}
+
+fn appendProjectedEdgeLines(
+    allocator: Allocator,
+    lines: *std.ArrayList([]u8),
     edge: projection.ProjectedEdge,
     include_classification: bool,
 ) Allocator.Error!void {
     for (edge.evidence()) |raw| {
         if (raw.locationItems().len == 0) {
-            try writeRawEdge(writer, raw, null, include_classification);
+            const line = try formatRawEdge(allocator, raw, null, include_classification);
+            errdefer allocator.free(line);
+            try lines.append(allocator, line);
             continue;
         }
         for (raw.locationItems()) |location| {
-            try writeRawEdge(writer, raw, location, include_classification);
+            const line = try formatRawEdge(allocator, raw, location, include_classification);
+            errdefer allocator.free(line);
+            try lines.append(allocator, line);
         }
     }
 }
 
-fn writeRawEdge(
-    writer: *std.Io.Writer,
+fn formatRawEdge(
+    allocator: Allocator,
     edge: extraction.Edge,
     location: ?extraction.SourceLocation,
     include_classification: bool,
-) Allocator.Error!void {
-    writer.writeAll("\n  - ") catch return error.OutOfMemory;
-    writeLocatedPath(writer, edge.source, location) catch return error.OutOfMemory;
-    writer.writeAll(" -> ") catch return error.OutOfMemory;
-    writePath(writer, edge.target) catch return error.OutOfMemory;
-    writer.writeAll(" [") catch return error.OutOfMemory;
-    writeImportKinds(writer, edge.import_kinds) catch return error.OutOfMemory;
+) Allocator.Error![]u8 {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeLocatedPath(&output.writer, edge.source, location) catch return error.OutOfMemory;
+    output.writer.writeAll(" -> ") catch return error.OutOfMemory;
+    writePath(&output.writer, edge.target) catch return error.OutOfMemory;
+    output.writer.writeAll(" [") catch return error.OutOfMemory;
+    writeImportKinds(&output.writer, edge.import_kinds) catch return error.OutOfMemory;
     if (include_classification) {
-        writer.writeAll("; class=") catch return error.OutOfMemory;
-        writeEnumSet(writer, extraction.TargetClass, edge.target_classes) catch return error.OutOfMemory;
-        writer.writeAll("; availability=") catch return error.OutOfMemory;
-        writeEnumSet(writer, extraction.TargetAvailability, edge.target_availabilities) catch return error.OutOfMemory;
+        output.writer.writeAll("; class=") catch return error.OutOfMemory;
+        writeEnumSet(&output.writer, extraction.TargetClass, edge.target_classes) catch return error.OutOfMemory;
+        output.writer.writeAll("; availability=") catch return error.OutOfMemory;
+        writeEnumSet(&output.writer, extraction.TargetAvailability, edge.target_availabilities) catch
+            return error.OutOfMemory;
     }
-    writer.writeByte(']') catch return error.OutOfMemory;
+    output.writer.writeByte(']') catch return error.OutOfMemory;
+    return output.toOwnedSlice();
+}
+
+fn writeImportLines(writer: *std.Io.Writer, lines: []const []u8) std.Io.Writer.Error!void {
+    for (lines) |line| try writer.print("\n  - {s}", .{line});
+}
+
+fn lineLessThan(_: void, left: []u8, right: []u8) bool {
+    return std.mem.order(u8, left, right) == .lt;
 }
 
 fn writeImportKinds(writer: *std.Io.Writer, kinds: extraction.ImportKinds) std.Io.Writer.Error!void {
@@ -584,6 +613,69 @@ test "file and external dependencies include deterministic locations kinds and c
             "Imports:\n" ++
             "  - src/client.zig:2:5 -> http_client [named_module; class=external; availability=resolved]",
         formatted_external.details,
+    );
+}
+
+test "dependency evidence is sorted independently of projected and raw insertion order" {
+    var later_target = try testProjectedEdge(
+        std.testing.allocator,
+        "src\\api.zig",
+        "src\\zeta.zig",
+        false,
+        .zig_file,
+        .internal,
+        .resolved,
+        .{ .byte_offset = 30, .line = 4, .column = 2 },
+    );
+    defer later_target.deinit(std.testing.allocator);
+    var earlier_target = try testProjectedEdge(
+        std.testing.allocator,
+        "src\\api.zig",
+        "src\\alpha.zig",
+        false,
+        .root_module,
+        .internal,
+        .resolved,
+        .{ .byte_offset = 20, .line = 3, .column = 7 },
+    );
+    defer earlier_target.deinit(std.testing.allocator);
+    var earlier_raw = try extraction.Edge.initClassifiedWithLocations(
+        std.testing.allocator,
+        "src\\api.zig",
+        "src\\alpha.zig",
+        false,
+        extraction.ImportKinds.initOne(.zig_file),
+        .internal,
+        .resolved,
+        &.{.{ .byte_offset = 2, .line = 1, .column = 3 }},
+    );
+    defer earlier_raw.deinit(std.testing.allocator);
+    try earlier_target.appendEvidence(std.testing.allocator, earlier_raw);
+
+    var payload = try assertion.FileDependencyViolation.initClonePointers(
+        std.testing.allocator,
+        "src\\api.zig",
+        &.{ &later_target, &earlier_target },
+        .should_not,
+    );
+    var violation = assertion.Violation.fromFileDependencyMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "API files should not depend on implementation files",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        "Rule: API files should not depend on implementation files\n" ++
+            "File: src/api.zig\n" ++
+            "Reason: depends on forbidden internal files\n" ++
+            "Imports:\n" ++
+            "  - src/api.zig:1:3 -> src/alpha.zig [zig_file]\n" ++
+            "  - src/api.zig:3:7 -> src/alpha.zig [root_module]\n" ++
+            "  - src/api.zig:4:2 -> src/zeta.zig [zig_file]",
+        formatted.details,
     );
 }
 
