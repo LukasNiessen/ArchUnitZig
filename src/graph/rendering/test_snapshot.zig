@@ -6,8 +6,8 @@ const report = @import("../projection/report.zig");
 pub fn make(allocator: std.mem.Allocator) !report.GraphReportSnapshot {
     var nodes = [_]report.GraphReportNode{
         try report.GraphReportNode.init(allocator, "n0", "app/\"api\"\n.zig"),
-        try report.GraphReportNode.init(allocator, "n1", "domain<&>.zig"),
-        try report.GraphReportNode.init(allocator, "n2", "assets/config,<x>.json"),
+        try report.GraphReportNode.init(allocator, "n1", "assets/config,<x>.json"),
+        try report.GraphReportNode.init(allocator, "n2", "domain<&>.zig"),
         try report.GraphReportNode.init(allocator, "n3", "std"),
     };
     defer for (&nodes) |*node| node.deinit(allocator);
@@ -17,20 +17,20 @@ pub fn make(allocator: std.mem.Allocator) !report.GraphReportSnapshot {
             allocator,
             nodes[0].label,
             nodes[1].label,
-            2,
+            1,
             false,
-            extraction.ImportKinds.initMany(&.{ .zig_file, .root_module }),
-            extraction.TargetClasses.initOne(.internal),
+            extraction.ImportKinds.initOne(.embedded_file),
+            extraction.TargetClasses.initOne(.resource),
             extraction.TargetAvailabilities.initOne(.resolved),
         ),
         try report.GraphReportEdge.init(
             allocator,
             nodes[0].label,
             nodes[2].label,
-            1,
+            2,
             false,
-            extraction.ImportKinds.initOne(.embedded_file),
-            extraction.TargetClasses.initOne(.resource),
+            extraction.ImportKinds.initMany(&.{ .zig_file, .root_module }),
+            extraction.TargetClasses.initOne(.internal),
             extraction.TargetAvailabilities.initOne(.resolved),
         ),
         try report.GraphReportEdge.init(

@@ -162,11 +162,11 @@ test "DOT renderer has stable golden output with aggregate external and resource
         \\  label="Architecture <Main>\r\n\"quoted\"";
         \\  labelloc=t;
         \\  "app/\"api\"\n.zig";
-        \\  "domain<&>.zig";
         \\  "assets/config,<x>.json";
+        \\  "domain<&>.zig";
         \\  "std";
-        \\  "app/\"api\"\n.zig" -> "domain<&>.zig" [label="2", tooltip="zig_file, root_module"];
         \\  "app/\"api\"\n.zig" -> "assets/config,<x>.json" [color="#2563eb", tooltip="embedded_file"];
+        \\  "app/\"api\"\n.zig" -> "domain<&>.zig" [label="2", tooltip="zig_file, root_module"];
         \\  "app/\"api\"\n.zig" -> "std" [style=dashed, tooltip="standard_library"];
         \\}
     ;
@@ -182,13 +182,13 @@ test "Mermaid renderer uses node ids escaped labels and resource link styling" {
         \\%% Architecture <Main> "quoted"
         \\flowchart LR
         \\  n0["app/&quot;api&quot;<br/>.zig"]
-        \\  n1["domain&lt;&amp;&gt;.zig"]
-        \\  n2["assets/config,&lt;x&gt;.json"]
+        \\  n1["assets/config,&lt;x&gt;.json"]
+        \\  n2["domain&lt;&amp;&gt;.zig"]
         \\  n3["std"]
-        \\  n0 -->|2| n1
-        \\  n0 --> n2
+        \\  n0 --> n1
+        \\  n0 -->|2| n2
         \\  n0 -.-> n3
-        \\  linkStyle 1 stroke:#2563eb,stroke-width:2px
+        \\  linkStyle 0 stroke:#2563eb,stroke-width:2px
     ;
     try std.testing.expectEqualStrings(expected, rendered);
 }
@@ -209,11 +209,11 @@ test "D2 renderer has stable quoted output and edge styles" {
     const expected =
         \\# Architecture <Main> "quoted"
         \\"app/\"api\"\n.zig"
-        \\"domain<&>.zig"
         \\"assets/config,<x>.json"
+        \\"domain<&>.zig"
         \\"std"
-        \\"app/\"api\"\n.zig" -> "domain<&>.zig": "2"
         \\"app/\"api\"\n.zig" -> "assets/config,<x>.json" { style.stroke: "#2563eb" }
+        \\"app/\"api\"\n.zig" -> "domain<&>.zig": "2"
         \\"app/\"api\"\n.zig" -> "std" { style.stroke-dash: 4 }
     ;
     try std.testing.expectEqualStrings(expected, rendered);
@@ -226,8 +226,8 @@ test "CSV renderer quotes hostile fields and includes every classification set" 
     defer std.testing.allocator.free(rendered);
     const expected =
         "source,target,count,external,import_kinds,target_classes,target_availabilities\n" ++
-        "\"app/\"\"api\"\"\n.zig\",domain<&>.zig,2,false,\"zig_file|root_module\",\"internal\",\"resolved\"\n" ++
         "\"app/\"\"api\"\"\n.zig\",\"assets/config,<x>.json\",1,false,\"embedded_file\",\"resource\",\"resolved\"\n" ++
+        "\"app/\"\"api\"\"\n.zig\",domain<&>.zig,2,false,\"zig_file|root_module\",\"internal\",\"resolved\"\n" ++
         "\"app/\"\"api\"\"\n.zig\",std,1,true,\"standard_library\",\"compiler\",\"unresolved\"";
     try std.testing.expectEqualStrings(expected, rendered);
 }

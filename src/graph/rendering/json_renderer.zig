@@ -89,7 +89,7 @@ test "JSON renderer emits the complete stable snapshot and round trips hostile s
     try std.testing.expectEqualStrings(snapshot.title, root.get("title").?.string);
     try std.testing.expectEqual(@as(usize, 4), root.get("nodes").?.array.items.len);
     try std.testing.expectEqual(@as(usize, 3), root.get("edges").?.array.items.len);
-    const resource = root.get("edges").?.array.items[1].object;
+    const resource = root.get("edges").?.array.items[0].object;
     try std.testing.expectEqualStrings("resource", resource.get("target_classes").?.array.items[0].string);
     try std.testing.expectEqual(@as(i64, 4), root.get("summary").?.object.get("raw_edge_count").?.integer);
 
