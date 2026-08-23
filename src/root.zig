@@ -122,6 +122,13 @@ pub const ProjectSlices = slice_rules.ProjectSlices;
 pub const SliceDependencyRule = slice_rules.SliceDependencyRule;
 pub const SlicesShould = slice_rules.SlicesShould;
 pub const SlicesShouldNot = slice_rules.SlicesShouldNot;
+pub const PlantUmlDependency = slice_rules.PlantUmlDependency;
+pub const PlantUmlDiagram = slice_rules.PlantUmlDiagram;
+pub const PlantUmlDiagnostic = slice_rules.PlantUmlDiagnostic;
+pub const PlantUmlDiagnosticKind = slice_rules.PlantUmlDiagnosticKind;
+pub const PlantUmlParseResult = slice_rules.PlantUmlParseResult;
+pub const PlantUmlRenderError = slice_rules.PlantUmlRenderError;
+pub const PlantUmlExportError = slice_rules.PlantUmlExportError;
 pub const TechnicalCode = common_error.TechnicalCode;
 pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
@@ -203,6 +210,9 @@ pub const projectSliceEdges = slice_rules.projectSliceEdges;
 pub const projectSliceLabels = slice_rules.projectSliceLabels;
 pub const projectSlices = slice_rules.projectSlices;
 pub const slices = slice_rules.slices;
+pub const parsePlantUml = slice_rules.parsePlantUml;
+pub const renderPlantUml = slice_rules.renderPlantUml;
+pub const exportPlantUml = slice_rules.exportPlantUml;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
