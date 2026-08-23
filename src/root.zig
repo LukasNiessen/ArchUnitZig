@@ -8,6 +8,7 @@ const common_error = @import("common/error.zig");
 const extraction = @import("common/extraction.zig");
 const file_rules = @import("files.zig");
 const fluentapi = @import("common/fluentapi.zig");
+const graph_reports = @import("graph.zig");
 const matching = @import("common/matching.zig");
 const layer_rules = @import("layers.zig");
 const projection = @import("common/projection.zig");
@@ -55,6 +56,10 @@ pub const FilesAdhereTo = file_rules.FilesAdhereTo;
 pub const FilesShould = file_rules.FilesShould;
 pub const FilesShouldNot = file_rules.FilesShouldNot;
 pub const Graph = extraction.Graph;
+pub const GraphReportEdge = graph_reports.GraphReportEdge;
+pub const GraphReportNode = graph_reports.GraphReportNode;
+pub const GraphReportSnapshot = graph_reports.GraphReportSnapshot;
+pub const GraphReportSummary = graph_reports.GraphReportSummary;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
 pub const ImportSummary = extraction.ImportSummary;
@@ -208,6 +213,7 @@ test {
     _ = @import("common/matching.zig");
     _ = @import("common/projection.zig");
     _ = @import("files.zig");
+    _ = @import("graph.zig");
     _ = @import("layers.zig");
     _ = @import("testing.zig");
 }
