@@ -2454,6 +2454,28 @@ test "adhereTo presents invalid UTF-8 and empty sources as byte-safe views" {
     try std.testing.expect(result.passes());
 }
 
+fn exerciseAdhereToTerminalAllocationFailures(allocator: Allocator) !void {
+    var entry = try projectFiles(allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var handler = try entry.inFile(&.{"src/api/handler.zig"});
+    defer handler.deinit();
+    var positive = try handler.should();
+    defer positive.deinit();
+    var terminal = try positive.adhereTo(handlerHasExpectedFileInfo, "handler metadata stays stable");
+    defer terminal.deinit(allocator);
+    var result = try terminal.check(CheckOptions.init(allocator, std.testing.io));
+    defer result.deinit(allocator);
+    try std.testing.expect(result.passes());
+}
+
+test "adhereTo terminal cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseAdhereToTerminalAllocationFailures,
+        .{},
+    );
+}
+
 fn checkCycleFixture(locator: []const u8) !assertion.ViolationList {
     var entry = try projectFiles(std.testing.allocator, .{ .locator = locator });
     defer entry.deinit();
