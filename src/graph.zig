@@ -26,6 +26,7 @@ pub const projectGraph = project_graph.projectGraph;
 
 test {
     _ = @import("graph/rendering/escaping.zig");
+    _ = @import("graph/rendering/json_renderer.zig");
     _ = @import("graph/rendering/support.zig");
     _ = @import("graph/rendering/text_renderers.zig");
     _ = @import("graph/fluentapi/project_graph.zig");
