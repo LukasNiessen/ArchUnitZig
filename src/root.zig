@@ -90,6 +90,10 @@ pub const resolveRelativeReference = extraction.resolveRelativeReference;
 pub const resolveModuleReference = extraction.resolveModuleReference;
 pub const validateModuleResolutionOverrides = extraction.validateModuleResolutionOverrides;
 pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
+pub const identity = projection.identity;
+pub const perEdge = projection.perEdge;
+pub const perExternalEdge = projection.perExternalEdge;
+pub const perInternalEdge = projection.perInternalEdge;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
