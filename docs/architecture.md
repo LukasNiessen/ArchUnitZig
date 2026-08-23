@@ -29,6 +29,19 @@ concepts distinct:
 - embedded resource files;
 - deprecated `@cImport` / C-header references while Zig 0.16 still supports them.
 
+Before graph normalization, every resolver result becomes an owned classified reference. Target
+class (`internal`, `external`, `compiler`, `resource`, or `c_header`) is separate from availability
+(`resolved`, `unresolved`, `missing`, or `outside_project`) and from the compatibility `external`
+boolean. This is intentional: a resolved embedded resource is project-owned but still a resource,
+while a missing resource remains a resource but is not an internal concrete target. `ImportKind`
+retains the finest Zig identity in every case.
+
+Classified results keep the raw import name, graph-facing target, optional mapped source path,
+source location, and all three classification facts. An explicitly mapped project module changes
+the graph target from its raw alias to the resolved project-relative root and becomes internal.
+Package and unresolved aliases keep stable raw graph targets. A resolved `root` alias can be
+internal while its `root_module` kind remains observable; `std` and `builtin` remain compiler class.
+
 Every discovered Zig source file receives a self-edge. Edges with the same `(source, target)` are
 merged and union their kinds. Public identifiers are project-relative and separator-normalised to
 `/`, which keeps patterns, diagnostics, cache keys, and golden output portable.

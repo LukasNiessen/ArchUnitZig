@@ -320,6 +320,103 @@ test "explicit module resolution promotes a stable raw name to an internal targe
     try std.testing.expect(!resolved.external);
 }
 
+fn writeFixture(tmp: *std.testing.TmpDir, path: []const u8) !void {
+    if (std.fs.path.dirname(path)) |directory| try tmp.dir.createDirPath(std.testing.io, directory);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = "" });
+}
+
+test "parsed references flow through resolvers into consistent classifications" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(&tmp, "src/main.zig");
+    try writeFixture(&tmp, "src/local.zig");
+    try writeFixture(&tmp, "src/domain/root.zig");
+    try writeFixture(&tmp, "assets/schema.json");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    const source: [:0]const u8 =
+        \\const local = @import("local.zig");
+        \\const schema = @embedFile("../assets/schema.json");
+        \\const std = @import("std");
+        \\const domain = @import("domain");
+        \\const c = @cImport({ @cInclude("sqlite3.h"); });
+    ;
+    const modules = [_]module_resolver.ModuleOverride{.{
+        .name = "domain",
+        .source_path = "src/domain/root.zig",
+    }};
+    const unit = module_resolver.CompilationUnitOverride{
+        .id = "app",
+        .root_source_path = "src/main.zig",
+        .modules = &modules,
+    };
+    var context = @import("../error.zig").ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var parsed = try source_parser.parseSource(
+        std.testing.allocator,
+        "src/main.zig",
+        source,
+        .strict,
+        &context,
+    );
+    defer parsed.deinit(std.testing.allocator);
+    const expected_classes = [_]TargetClass{ .internal, .resource, .compiler, .internal, .c_header };
+    const expected_external = [_]bool{ false, false, true, false, true };
+
+    for (parsed.references.items, expected_classes, expected_external) |parsed_reference, expected_class, external| {
+        var classified = switch (parsed_reference.kind) {
+            .zig_file, .zon_file, .embedded_file => file: {
+                var file_resolution = (try relative_resolver.resolveRelativeReference(
+                    std.testing.allocator,
+                    std.testing.io,
+                    root,
+                    parsed.source_path,
+                    parsed_reference,
+                    &context,
+                )).?;
+                defer file_resolution.deinit(std.testing.allocator);
+                break :file try classifyReference(std.testing.allocator, .{ .file = .{
+                    .reference = parsed_reference,
+                    .resolution = file_resolution,
+                } });
+            },
+            .named_module, .standard_library, .builtin_module, .root_module => module: {
+                var module_resolution = (try module_resolver.resolveModuleReference(
+                    std.testing.allocator,
+                    std.testing.io,
+                    root,
+                    unit,
+                    parsed_reference,
+                    &context,
+                )).?;
+                defer module_resolution.deinit(std.testing.allocator);
+                break :module try classifyReference(std.testing.allocator, .{ .module = module_resolution });
+            },
+            .c_header => try classifyReference(std.testing.allocator, .{ .raw = parsed_reference }),
+        };
+        defer classified.deinit(std.testing.allocator);
+        try std.testing.expectEqual(expected_class, classified.class);
+        try std.testing.expectEqual(external, classified.external);
+        try std.testing.expectEqual(parsed_reference.kind, classified.kind);
+        try std.testing.expectEqual(parsed_reference.location, classified.location);
+    }
+}
+
+test "classified output owns raw graph and mapped path bytes" {
+    var raw = [_]u8{ 'd', 'o', 'm', 'a', 'i', 'n' };
+    var mapped = [_]u8{ 's', 'r', 'c', '/', 'r', 'o', 'o', 't', '.', 'z', 'i', 'g' };
+    var classified = try classifyReference(
+        std.testing.allocator,
+        moduleInput(&raw, &mapped, .named_module, .resolved_project),
+    );
+    defer classified.deinit(std.testing.allocator);
+    raw[0] = 'X';
+    mapped[0] = 'Y';
+    try std.testing.expectEqualStrings("domain", classified.raw_target);
+    try std.testing.expectEqualStrings("src/root.zig", classified.target);
+    try std.testing.expectEqualStrings("src/root.zig", classified.mapped_source_path.?);
+}
+
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var classified = try classifyReference(
         allocator,
