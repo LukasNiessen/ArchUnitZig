@@ -267,6 +267,13 @@ test "canonical roots produce equal keys and every option separates keys" {
     defer equivalent.deinit(std.testing.allocator);
     try std.testing.expect(baseline.eql(equivalent));
 
+    try tmp.dir.createDirPath(std.testing.io, "other-project");
+    const other_root = try tmp.dir.realPathFileAlloc(std.testing.io, "other-project", std.testing.allocator);
+    defer std.testing.allocator.free(other_root);
+    var other_project = try buildGraphCacheKey(std.testing.allocator, std.testing.io, other_root, .{}, &context);
+    defer other_project.deinit(std.testing.allocator);
+    try std.testing.expect(!baseline.eql(other_project));
+
     const module_resolver = @import("module_resolver.zig");
     const exclusions = [_][]const u8{"generated/**"};
     const modules = [_]module_resolver.ModuleOverride{.{ .name = "domain", .source_path = "src/domain/root.zig" }};
@@ -290,6 +297,99 @@ test "canonical roots produce equal keys and every option separates keys" {
     }
 }
 
+test "every compilation-unit and module mapping field separates cache keys" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    const module_resolver = @import("module_resolver.zig");
+    const Mapping = struct {
+        unit_id: []const u8 = "app",
+        root_source_path: ?[]const u8 = "src/main.zig",
+        module_name: []const u8 = "domain",
+        module_source_path: []const u8 = "src/domain/root.zig",
+        module_origin: module_resolver.ModuleOrigin = .project,
+    };
+    const baseline_mapping: Mapping = .{};
+    const variants = [_]Mapping{
+        .{ .unit_id = "tests" },
+        .{ .root_source_path = null },
+        .{ .root_source_path = "src/other.zig" },
+        .{ .module_name = "application" },
+        .{ .module_source_path = "src/application/root.zig" },
+        .{ .module_origin = .package },
+    };
+
+    const baseline_modules = [_]module_resolver.ModuleOverride{.{
+        .name = baseline_mapping.module_name,
+        .source_path = baseline_mapping.module_source_path,
+        .origin = baseline_mapping.module_origin,
+    }};
+    const baseline_units = [_]module_resolver.CompilationUnitOverride{.{
+        .id = baseline_mapping.unit_id,
+        .root_source_path = baseline_mapping.root_source_path,
+        .modules = &baseline_modules,
+    }};
+    var baseline = try buildGraphCacheKey(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        .{ .module_resolution = .{ .compilation_units = &baseline_units } },
+        &context,
+    );
+    defer baseline.deinit(std.testing.allocator);
+
+    for (variants) |mapping| {
+        const modules = [_]module_resolver.ModuleOverride{.{
+            .name = mapping.module_name,
+            .source_path = mapping.module_source_path,
+            .origin = mapping.module_origin,
+        }};
+        const units = [_]module_resolver.CompilationUnitOverride{.{
+            .id = mapping.unit_id,
+            .root_source_path = mapping.root_source_path,
+            .modules = &modules,
+        }};
+        var variant = try buildGraphCacheKey(
+            std.testing.allocator,
+            std.testing.io,
+            root,
+            .{ .module_resolution = .{ .compilation_units = &units } },
+            &context,
+        );
+        defer variant.deinit(std.testing.allocator);
+        try std.testing.expect(!baseline.eql(variant));
+    }
+}
+
+test "cache key construction reports invalid roots as user errors" {
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    try std.testing.expectError(
+        error.InvalidProjectPath,
+        buildGraphCacheKey(std.testing.allocator, std.testing.io, "", .{}, &context),
+    );
+    try std.testing.expectEqual(common_error.ErrorCategory.user, context.diagnostic.?.category());
+    try std.testing.expectEqualStrings("graph_cache.build_key", context.diagnostic.?.operation);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    const missing = try std.fs.path.join(std.testing.allocator, &.{ root, "missing" });
+    defer std.testing.allocator.free(missing);
+    try std.testing.expectError(
+        error.InvalidProjectPath,
+        buildGraphCacheKey(std.testing.allocator, std.testing.io, missing, .{}, &context),
+    );
+    try std.testing.expectEqual(common_error.ErrorCategory.user, context.diagnostic.?.category());
+    try std.testing.expectEqual(error.FileNotFound, context.diagnostic.?.cause.?);
+}
+
 test "instance cache hits own keys and return independent graphs" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -297,15 +397,19 @@ test "instance cache hits own keys and return independent graphs" {
     defer std.testing.allocator.free(root);
     var context = common_error.ErrorContext.init(std.testing.allocator);
     defer context.deinit();
-    var key = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
-    defer key.deinit(std.testing.allocator);
-    var graph = try makeGraph(std.testing.allocator, "dependency");
     var cache = GraphCache.init(std.testing.allocator);
     defer cache.deinit();
-    try cache.put(key, graph);
-    graph.deinit(std.testing.allocator);
+    {
+        var caller_key = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+        defer caller_key.deinit(std.testing.allocator);
+        var caller_graph = try makeGraph(std.testing.allocator, "dependency");
+        defer caller_graph.deinit(std.testing.allocator);
+        try cache.put(caller_key, caller_graph);
+    }
     try std.testing.expectEqual(@as(usize, 1), cache.len());
 
+    var key = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer key.deinit(std.testing.allocator);
     var first = (try cache.get(std.testing.allocator, key)).?;
     defer first.deinit(std.testing.allocator);
     var second = (try cache.get(std.testing.allocator, key)).?;
