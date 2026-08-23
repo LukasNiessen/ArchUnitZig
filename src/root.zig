@@ -4,12 +4,18 @@
 
 const std = @import("std");
 const assertion = @import("common/assertion.zig");
+const common_error = @import("common/error.zig");
 const extraction = @import("common/extraction.zig");
 const fluentapi = @import("common/fluentapi.zig");
 const matching = @import("common/matching.zig");
 
 pub const Edge = extraction.Edge;
+pub const ArchUnitError = common_error.ArchUnitError;
+pub const Diagnostic = common_error.Diagnostic;
+pub const DiagnosticCode = common_error.DiagnosticCode;
 pub const EmptyTestViolation = assertion.EmptyTestViolation;
+pub const ErrorCategory = common_error.ErrorCategory;
+pub const ErrorContext = common_error.ErrorContext;
 pub const Graph = extraction.Graph;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
@@ -25,6 +31,10 @@ pub const ModuleResolutionOverrides = fluentapi.ModuleResolutionOverrides;
 pub const Pattern = matching.Pattern;
 pub const PatternSyntax = matching.PatternSyntax;
 pub const PatternTarget = matching.PatternTarget;
+pub const TechnicalCode = common_error.TechnicalCode;
+pub const TechnicalError = common_error.TechnicalError;
+pub const UserCode = common_error.UserCode;
+pub const UserError = common_error.UserError;
 pub const RegexFactory = matching.RegexFactory;
 pub const ScopePattern = assertion.ScopePattern;
 pub const Violation = assertion.Violation;
@@ -32,6 +42,7 @@ pub const ViolationList = assertion.ViolationList;
 pub const matchesAny = matching.matchesAny;
 pub const matchesSelectors = matching.matchesSelectors;
 pub const checkAll = fluentapi.checkAll;
+pub const categoryOfError = common_error.categoryOf;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
@@ -49,6 +60,7 @@ test "public facade builds and runs pattern filters" {
 test {
     _ = std.testing;
     _ = @import("common/assertion.zig");
+    _ = @import("common/error.zig");
     _ = @import("common/extraction.zig");
     _ = @import("common/fluentapi.zig");
     _ = @import("common/matching.zig");
