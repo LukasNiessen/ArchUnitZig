@@ -182,12 +182,14 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     var graph: Graph = .{};
     defer graph.deinit(allocator);
 
-    try graph.add(
+    const location = edge_module.SourceLocation{ .byte_offset = 12, .line = 1, .column = 13 };
+    try graph.addLocated(
         allocator,
         "src/main.zig",
         "src/service.zig",
         false,
         ImportKinds.initOne(.zig_file),
+        &.{location},
     );
     try graph.add(
         allocator,
