@@ -161,6 +161,24 @@ Consequence: comments and string contents cannot create dependencies, escaped ta
 according to Zig semantics, callers can choose fail-fast versus editor-friendly analysis, and no
 project code or build script executes. A Zig upgrade must review both AST and token APIs under D001.
 
+### D015 — Relative file resolution is explicit and root-bounded
+
+Zig 0.16 defines a file-form `@import` target as relative to the file containing the call. The same
+basis applies to `@embedFile`. ArchUnitZig resolves `.zig`, `.zon`, and embedded-resource targets by
+combining decoded strings with the importing file's project-relative directory, normalising both
+separator forms plus `.`/`..`, and then canonicalising an existing target against the canonical
+project root.
+
+Resolution returns an owned target with its original import kind and source location plus one of
+`resolved`, `missing`, or `outside_project`. A lexical root escape is reported without probing it;
+canonical comparison prevents filesystem indirection from silently making an external file
+internal. Absolute targets are outside because the language contract requires relative file paths.
+Named/compiler imports return no path-resolution result and are never guessed by appending `.zig`.
+
+Consequence: missing and outside targets remain diagnosable, ZON and resource files owned by the
+project can become internal graph nodes, and build-defined aliases remain visible for issue #11.
+Final external/compiler/resource classification remains the responsibility of issue #12.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))

@@ -83,9 +83,17 @@ returns owned syntax diagnostics instead; a file rejected by the AST contributes
 This policy preserves deterministic whole-file analysis while allowing callers such as editors to
 continue across broken files.
 
-Relative `.zig`, `.zon`, and embedded-file paths resolve from the importing file. Named module
-imports cannot be resolved from the string alone: `build.zig` supplies aliases and a repository may
-have several roots with different import tables. The safe initial design accepts explicit
+Relative `.zig`, `.zon`, and embedded-file paths resolve from the importing file. The resolver
+collapses `.` and `..` segments using project-relative `/` identifiers before filesystem access.
+Existing targets are canonicalised against the canonical project root, which also catches paths
+that leave the root through filesystem indirection. Results explicitly distinguish `resolved`,
+`missing`, and `outside_project`; resolved ZON and embedded resources stay internal while retaining
+their original import kind and source location. Absolute targets are outside because Zig documents
+file imports as relative.
+
+Named module imports cannot be resolved from the string alone: `build.zig` supplies aliases and a
+repository may have several roots with different import tables. The path resolver returns no result
+for those kinds and never probes by appending `.zig`. The safe initial design accepts explicit
 compilation-root/module maps and preserves unresolved aliases as visible targets. Static discovery
 for common build declarations may be added when it can report its limits honestly. Running an
 arbitrary project's `build.zig` is never the default because build files are executable code.

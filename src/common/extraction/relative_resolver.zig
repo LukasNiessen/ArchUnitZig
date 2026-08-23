@@ -380,17 +380,138 @@ test "keeps ZON and embedded targets internal with their original kinds" {
 }
 
 test "named modules are never inferred as Zig files" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(&tmp, "src/main.zig");
+    try writeFixture(&tmp, "src/support.zig");
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
     var context = common_error.ErrorContext.init(std.testing.allocator);
     defer context.deinit();
     const resolved = try resolveRelativeReference(
         std.testing.allocator,
         std.testing.io,
-        "unused-root",
+        root,
         "src/main.zig",
         makeReference("support", .named_module),
         &context,
     );
     try std.testing.expectEqual(@as(?ResolvedReference, null), resolved);
+}
+
+test "parser output resolves as one owned path pipeline" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(&tmp, "src/main.zig");
+    try writeFixture(&tmp, "domain/model.zig");
+    try writeFixture(&tmp, "config/settings.zon");
+    try writeFixture(&tmp, "assets/schema.json");
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    const source: [:0]const u8 =
+        \\const model = @import("../domain/model.zig");
+        \\const settings = @import("../config/settings.zon");
+        \\const schema = @embedFile("../assets/schema.json");
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var parsed = try source_parser.parseSource(
+        std.testing.allocator,
+        "src/main.zig",
+        source,
+        .strict,
+        &context,
+    );
+    defer parsed.deinit(std.testing.allocator);
+
+    const expected_targets = [_][]const u8{
+        "domain/model.zig",
+        "config/settings.zon",
+        "assets/schema.json",
+    };
+    for (parsed.references.items, expected_targets) |parsed_reference, expected_target| {
+        var resolved = (try resolveRelativeReference(
+            std.testing.allocator,
+            std.testing.io,
+            root,
+            parsed.source_path,
+            parsed_reference,
+            &context,
+        )).?;
+        defer resolved.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings(expected_target, resolved.target);
+        try std.testing.expectEqual(FileResolutionStatus.resolved, resolved.status);
+        try std.testing.expectEqual(parsed_reference.kind, resolved.kind);
+        try std.testing.expectEqual(parsed_reference.location, resolved.location);
+    }
+}
+
+test "invalid project roots and importing paths produce user diagnostics" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(&tmp, "src/main.zig");
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+
+    var source_context = common_error.ErrorContext.init(std.testing.allocator);
+    defer source_context.deinit();
+    try std.testing.expectError(
+        error.InvalidProjectPath,
+        resolveRelativeReference(
+            std.testing.allocator,
+            std.testing.io,
+            root,
+            "../src/main.zig",
+            makeReference("dependency.zig", .zig_file),
+            &source_context,
+        ),
+    );
+    try std.testing.expectEqual(common_error.ErrorCategory.user, source_context.diagnostic.?.category());
+    try std.testing.expectEqualStrings("import.resolve_source", source_context.diagnostic.?.operation);
+    try std.testing.expectEqualStrings("../src/main.zig", source_context.diagnostic.?.subject.?);
+
+    const missing_root = try std.fs.path.join(std.testing.allocator, &.{ root, "missing-project" });
+    defer std.testing.allocator.free(missing_root);
+    var root_context = common_error.ErrorContext.init(std.testing.allocator);
+    defer root_context.deinit();
+    try std.testing.expectError(
+        error.InvalidProjectPath,
+        resolveRelativeReference(
+            std.testing.allocator,
+            std.testing.io,
+            missing_root,
+            "src/main.zig",
+            makeReference("dependency.zig", .zig_file),
+            &root_context,
+        ),
+    );
+    try std.testing.expectEqual(common_error.ErrorCategory.user, root_context.diagnostic.?.category());
+    try std.testing.expectEqualStrings("import.resolve_project_root", root_context.diagnostic.?.operation);
+}
+
+test "absolute dependency paths cannot become project-relative targets" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(&tmp, "src/main.zig");
+    try writeFixture(&tmp, "absolute.zig");
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    const absolute_target = try std.fs.path.join(std.testing.allocator, &.{ root, "absolute.zig" });
+    defer std.testing.allocator.free(absolute_target);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var resolved = (try resolveRelativeReference(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        "src/main.zig",
+        makeReference(absolute_target, .zig_file),
+        &context,
+    )).?;
+    defer resolved.deinit(std.testing.allocator);
+    try std.testing.expectEqual(FileResolutionStatus.outside_project, resolved.status);
+    try std.testing.expect(isAbsoluteLike(resolved.target));
 }
 
 test "parallel references resolve independently to the same target" {
