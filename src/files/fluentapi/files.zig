@@ -2050,6 +2050,26 @@ test "external module empty-object guard protects negated typos and allow-empty 
     var allowed = try terminal.checkGraph(options, &graph);
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expect(allowed.passes());
+
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var missing = try entry.inFolder(&.{.{ .glob = "missing" }});
+    defer missing.deinit();
+    var missing_mood = try missing.should();
+    defer missing_mood.deinit();
+    var missing_builder = try missing_mood.dependOnExternalModules();
+    defer missing_builder.deinit();
+    var missing_terminal = try missing_builder.matching(&.{.{ .glob = "http_client" }});
+    defer missing_terminal.deinit(std.testing.allocator);
+    var missing_result = try missing_terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer missing_result.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_external_modules.subject",
+        missing_result.items()[0].empty_test.rule_id,
+    );
 }
 
 test "external module fixture distinguishes local aliases packages unresolved and explicit categories" {
@@ -2115,6 +2135,19 @@ test "external module fixture distinguishes local aliases packages unresolved an
     var resource_result = try resource.check(options);
     defer resource_result.deinit(std.testing.allocator);
     try std.testing.expect(resource_result.items()[0].external_module_dependency.items()[0].evidence()[0].target_classes.contains(.resource));
+
+    var positive = try api.should();
+    defer positive.deinit();
+    var positive_builder = try positive.dependOnExternalModules();
+    defer positive_builder.deinit();
+    var allowed_package = try positive_builder.matching(&.{.{ .glob = "http_client" }});
+    defer allowed_package.deinit(std.testing.allocator);
+    var allowed_named = try allowed_package.matching(&.{.{ .glob = "telemetry" }});
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &allowed_named);
+    defer erased.deinit();
+    var allowed_result = try erased.check(options);
+    defer allowed_result.deinit(std.testing.allocator);
+    try std.testing.expect(allowed_result.passes());
 }
 
 fn exerciseExternalTerminalAllocationFailures(allocator: Allocator) !void {
