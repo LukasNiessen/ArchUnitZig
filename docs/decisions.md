@@ -179,6 +179,30 @@ Consequence: missing and outside targets remain diagnosable, ZON and resource fi
 project can become internal graph nodes, and build-defined aliases remain visible for issue #11.
 Final external/compiler/resource classification remains the responsibility of issue #12.
 
+### D016 — Module resolution is scoped to explicit compilation units
+
+A Zig repository does not have one global import table. Each library, executable, test, or other
+compilation root may bind the same module name differently. Resolution therefore accepts an
+explicit compilation unit with a stable id, optional root source path, and exact alias mappings.
+Mappings declare `project` or `package` origin. `root` uses the selected unit; `std` and `builtin`
+remain compiler-provided; unknown aliases remain owned unresolved results.
+
+Project mappings reuse the root-bounded file resolver. Package roots are existence-checked but keep
+their stable raw alias as the graph-facing target and remain package-provided even when stored under
+the repository. Duplicate aliases inside one unit, duplicate unit ids, empty mappings, and attempts
+to override `std`, `builtin`, or `root` are user errors. Identical aliases in different units are
+valid and resolve independently.
+
+ArchUnitZig does not read or execute `build.zig` for this path. Build scripts are arbitrary Zig
+programs and may derive roots/imports through options, control flow, helper functions, dependencies,
+environment, or I/O. Static matching of a few `std.Build` call shapes would be safe to execute but
+dishonest about completeness, so it is deferred until a mode can publish a precise supported-form
+contract and surface everything else as unresolved.
+
+Consequence: resolution is deterministic and context-correct without running untrusted code. Users
+or build integrations must supply the compilation contexts they actually test; issue #12 can then
+classify the explicit statuses without reconstructing build semantics.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))

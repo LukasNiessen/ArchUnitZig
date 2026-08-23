@@ -3,6 +3,12 @@ pub const Graph = @import("extraction/graph.zig").Graph;
 pub const ImportKind = @import("extraction/import_kind.zig").ImportKind;
 pub const ImportKinds = @import("extraction/import_kind.zig").ImportKinds;
 pub const LocatedProject = @import("extraction/project_locator.zig").LocatedProject;
+pub const CompilationUnitOverride = @import("extraction/module_resolver.zig").CompilationUnitOverride;
+pub const ModuleOrigin = @import("extraction/module_resolver.zig").ModuleOrigin;
+pub const ModuleOverride = @import("extraction/module_resolver.zig").ModuleOverride;
+pub const ModuleResolutionOverrides = @import("extraction/module_resolver.zig").ModuleResolutionOverrides;
+pub const ModuleResolutionStatus = @import("extraction/module_resolver.zig").ModuleResolutionStatus;
+pub const ResolvedModuleReference = @import("extraction/module_resolver.zig").ResolvedModuleReference;
 pub const ProjectMarker = @import("extraction/project_locator.zig").ProjectMarker;
 pub const EnumerationOptions = @import("extraction/source_files.zig").EnumerationOptions;
 pub const SourceFiles = @import("extraction/source_files.zig").SourceFiles;
@@ -18,6 +24,8 @@ pub const Strictness = @import("extraction/source_parser.zig").Strictness;
 pub const SyntaxDiagnostic = @import("extraction/source_parser.zig").SyntaxDiagnostic;
 pub const parseSource = @import("extraction/source_parser.zig").parseSource;
 pub const resolveRelativeReference = @import("extraction/relative_resolver.zig").resolveRelativeReference;
+pub const resolveModuleReference = @import("extraction/module_resolver.zig").resolveModuleReference;
+pub const validateModuleResolutionOverrides = @import("extraction/module_resolver.zig").validateModuleResolutionOverrides;
 pub const locateProject = @import("extraction/project_locator.zig").locateProject;
 
 test {
@@ -26,6 +34,7 @@ test {
     _ = @import("extraction/graph.zig");
     _ = @import("extraction/identifier.zig");
     _ = @import("extraction/import_kind.zig");
+    _ = @import("extraction/module_resolver.zig");
     _ = @import("extraction/project_locator.zig");
     _ = @import("extraction/relative_resolver.zig");
     _ = @import("extraction/source_files.zig");
