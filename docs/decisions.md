@@ -407,3 +407,26 @@ format a readable closed path such as `a.zig -> b.zig -> a.zig` from the data.
 Consequence: selection boundaries are predictable, external dependencies and normalization
 self-edges cannot create false cycles, results survive graph/cache destruction, and future text or
 machine reporters can choose their own rendering without re-extracting source evidence.
+
+### D026 — Self-contained file matching is one target-driven assertion
+
+`haveName`, `beInFolder`, and `beInPath` compile one predicate pattern at fluent construction time
+and are available in both moods. All six entry points return the same owned terminal type. The
+terminal differs only by the target stored in its filter: filename, path without filename, or full
+project-relative path. It first applies the independently built subject selectors, enforces the
+shared empty-test guard, then delegates to a pure `gatherMatchingFileViolations` function.
+
+The gatherer accepts selected paths, a compiled filter, owned predicate evidence, and one `Mood`.
+It normalizes separators through the matching kernel, evaluates each path once, and reports exactly
+when `Mood.holds` is false. Glob compilation is anchored and records exact whole-target semantics;
+regular expressions record partial semantics, with anchors available when the caller wants an exact
+regular expression. A root-level file has `.` as its folder, matching the selector contract.
+
+Every `matching` violation deep-copies the subject path and original predicate expression and stores
+the syntax, target, matching mode, and mood. It does not retain a builder, compiled regex, graph, or
+rendered sentence. Predicate construction therefore catches malformed patterns before filesystem
+work, while returned violations survive terminal, graph, and cache destruction.
+
+Consequence: the three predicates cannot drift into subtly different matching behavior, both moods
+share one assertion path, Windows and POSIX spellings agree, and testing/reporting layers receive
+enough structured evidence to explain either a required non-match or a forbidden match.
