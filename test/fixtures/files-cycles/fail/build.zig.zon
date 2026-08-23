@@ -1,0 +1,5 @@
+.{
+    .name = .archunit_fixture_fail,
+    .version = "0.0.0",
+    .fingerprint = 0x7659e3d6720b8b91,
+}

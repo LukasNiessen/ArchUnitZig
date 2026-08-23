@@ -3,7 +3,9 @@ const std = @import("std");
 const assertion = @import("../../common/assertion.zig");
 const common_error = @import("../../common/error.zig");
 const extraction = @import("../../common/extraction.zig");
+const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
+const file_cycles = @import("../projection/file_cycles.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Filter = matching.Filter;
@@ -12,6 +14,7 @@ pub const Mood = assertion.Mood;
 pub const Pattern = matching.Pattern;
 pub const PatternTarget = matching.PatternTarget;
 pub const ScopePattern = assertion.ScopePattern;
+pub const CheckOptions = fluentapi.CheckOptions;
 
 pub const BuilderError = Allocator.Error || error{
     InvalidPattern,
@@ -465,6 +468,98 @@ pub const FilesShould = struct {
     pub fn description(self: *const FilesShould, allocator: Allocator) Allocator.Error![]u8 {
         return self.rule.description(allocator);
     }
+
+    /// Completes the positive-only file-cycle grammar with an independently owned terminal rule.
+    pub fn haveNoCycles(self: *const FilesShould) BuilderError!FilesHaveNoCycles {
+        return .{ .rule = try self.rule.clone() };
+    }
+};
+
+/// Positive terminal rule for elementary cycles in the selected internal file graph.
+pub const FilesHaveNoCycles = struct {
+    rule: FileRuleContext,
+
+    /// The allocator argument is the Checkable box allocator. Scope storage remembers and uses its
+    /// own builder allocator, so moving a rule into a differently allocated Checkable stays safe.
+    pub fn deinit(self: *FilesHaveNoCycles, allocator: Allocator) void {
+        _ = allocator;
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const FilesHaveNoCycles, allocator: Allocator) Allocator.Error![]u8 {
+        const prefix = try self.rule.description(allocator);
+        defer allocator.free(prefix);
+        return std.fmt.allocPrint(allocator, "{s}, have no cycles", .{prefix});
+    }
+
+    pub fn check(self: *const FilesHaveNoCycles, options: CheckOptions) anyerror!assertion.ViolationList {
+        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        defer diagnostics.deinit();
+        var graph = try extraction.extractProjectGraph(
+            options.allocator,
+            options.io,
+            self.rule.scope.projectLocator(),
+            options.working_directory,
+            options.extraction,
+            options.clear_cache,
+            &diagnostics,
+        );
+        defer graph.deinit(options.allocator);
+        return self.checkGraph(options, &graph);
+    }
+
+    fn checkGraph(
+        self: *const FilesHaveNoCycles,
+        options: CheckOptions,
+        graph: *const Graph,
+    ) anyerror!assertion.ViolationList {
+        var selected = try self.rule.select(graph);
+        defer selected.deinit();
+        if (selected.len() == 0) {
+            if (options.allow_empty_tests) return .{};
+            return self.emptySelection(options.allocator);
+        }
+
+        var cycles = try file_cycles.projectSelectedFileCycles(
+            options.allocator,
+            graph,
+            selected.items(),
+        );
+        defer cycles.deinit(options.allocator);
+        var result = assertion.ViolationList{};
+        errdefer result.deinit(options.allocator);
+        for (cycles.items()) |cycle| {
+            var payload = try assertion.CycleViolation.initClone(options.allocator, cycle);
+            var violation = assertion.Violation.fromCycleMove(&payload);
+            result.appendMove(options.allocator, &violation) catch |failure| {
+                violation.deinit(options.allocator);
+                return failure;
+            };
+        }
+        return result;
+    }
+
+    fn emptySelection(
+        self: *const FilesHaveNoCycles,
+        allocator: Allocator,
+    ) anyerror!assertion.ViolationList {
+        var scope = try self.rule.scopePatterns(allocator);
+        defer scope.deinit(allocator);
+        var payload = try assertion.EmptyTestViolation.init(
+            allocator,
+            "files.have_no_cycles",
+            scope.items(),
+            false,
+        );
+        var violation = assertion.Violation.fromEmptyTestMove(&payload);
+        var result = assertion.ViolationList{};
+        result.appendMove(allocator, &violation) catch |failure| {
+            violation.deinit(allocator);
+            return failure;
+        };
+        return result;
+    }
 };
 
 /// Negated mood stage. It is deliberately one mood flag over the same context and assertions.
@@ -735,6 +830,111 @@ test "mood stages prevent repeated or out-of-order fluent grammar and offer no s
         try std.testing.expect(!@hasDecl(FilesShould, invalid));
         try std.testing.expect(!@hasDecl(FilesShouldNot, invalid));
     }
+}
+
+test "have no cycles is available only in the positive mood" {
+    try std.testing.expect(@hasDecl(FilesShould, "haveNoCycles"));
+    try std.testing.expect(!@hasDecl(FilesShouldNot, "haveNoCycles"));
+}
+
+fn checkCycleFixture(locator: []const u8) !assertion.ViolationList {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = locator });
+    defer entry.deinit();
+    var positive = try entry.should();
+    defer positive.deinit();
+    var terminal = try positive.haveNoCycles();
+    defer terminal.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    return terminal.check(options);
+}
+
+test "have no cycles passes and fails against real Zig fixture projects" {
+    var passing = try checkCycleFixture("test/fixtures/files-cycles/pass");
+    defer passing.deinit(std.testing.allocator);
+    try std.testing.expect(passing.passes());
+
+    var failing = try checkCycleFixture("test/fixtures/files-cycles/fail");
+    defer failing.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 3), failing.items().len);
+    for (failing.items()) |violation| try std.testing.expectEqual(assertion.Violation.Kind.cycle, violation.kind());
+
+    const formatCyclePath = @import("../../testing.zig").formatCyclePath;
+    const first_path = try formatCyclePath(std.testing.allocator, failing.items()[0].cycle.cycle);
+    defer std.testing.allocator.free(first_path);
+    try std.testing.expectEqualStrings("src/a.zig -> src/b.zig -> src/a.zig", first_path);
+    const first_import = failing.items()[0].cycle.cycle.items()[0].evidence()[0];
+    try std.testing.expectEqualStrings("src/a.zig", first_import.source);
+    try std.testing.expectEqualStrings("src/b.zig", first_import.target);
+    try std.testing.expectEqual(@as(usize, 1), first_import.locationItems().len);
+    try std.testing.expectEqual(@as(u32, 1), first_import.locationItems()[0].line);
+}
+
+test "selection boundaries do not contract an outside intermediate file" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-cycles/fail" });
+    defer entry.deinit();
+    var boundary = try entry.inFolder(&.{.{ .glob = "src/boundary" }});
+    defer boundary.deinit();
+    var positive = try boundary.should();
+    defer positive.deinit();
+    var terminal = try positive.haveNoCycles();
+    defer terminal.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try terminal.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.passes());
+}
+
+test "empty selections fail by default and can be explicitly allowed" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-cycles/pass" });
+    defer entry.deinit();
+    var missing = try entry.inPath(&.{.{ .glob = "missing/**" }});
+    defer missing.deinit();
+    var positive = try missing.should();
+    defer positive.deinit();
+    var terminal = try positive.haveNoCycles();
+    defer terminal.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var rejected = try terminal.check(options);
+    defer rejected.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), rejected.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, rejected.items()[0].kind());
+    try std.testing.expectEqualStrings("files.have_no_cycles", rejected.items()[0].empty_test.rule_id);
+
+    options.allow_empty_tests = true;
+    var allowed = try terminal.check(options);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+fn exerciseCycleRuleAllocationFailures(allocator: Allocator) !void {
+    var graph: Graph = .{};
+    defer graph.deinit(allocator);
+    try graph.add(allocator, "a.zig", "a.zig", false, extraction.ImportKinds.initEmpty());
+    try graph.add(allocator, "b.zig", "b.zig", false, extraction.ImportKinds.initEmpty());
+    try graph.add(allocator, "a.zig", "b.zig", false, extraction.ImportKinds.initOne(.zig_file));
+    try graph.add(allocator, "b.zig", "a.zig", false, extraction.ImportKinds.initOne(.zig_file));
+    graph.sort();
+    var entry = try projectFiles(allocator, .{});
+    defer entry.deinit();
+    var positive = try entry.should();
+    defer positive.deinit();
+    var terminal = try positive.haveNoCycles();
+    defer terminal.deinit(allocator);
+    var result = try terminal.checkGraph(CheckOptions.init(allocator, std.testing.io), &graph);
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+}
+
+test "have no cycles cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseCycleRuleAllocationFailures,
+        .{},
+    );
 }
 
 test "positive and negated descriptions share one stable sentence renderer" {
