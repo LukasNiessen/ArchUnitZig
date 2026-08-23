@@ -195,6 +195,11 @@ owner is wanted. This makes branching safe without an arena parent lifetime. Sel
 compiles patterns but performs no I/O. Its pure `select(graph)` boundary consumes a normalized graph;
 terminal `check` remains the only fluent operation that may locate and extract a project.
 
+`should` and `shouldNot` return different owned stage types over one shared rule context. The context
+carries the scope plus a two-value `Mood`; `Mood.holds(predicate_result)` is the only assertion-level
+negation operation. Mood stages expose neither another mood nor scope selectors, and the grammar has
+no synonyms. Rule descriptions reuse one renderer and append only `should` or `should not`.
+
 `Violation` is an owned, closed tagged union of structured facts. Each domain rule adds an evidence
 shape only when it lands, and the testing formatter must then handle the new tag exhaustively. The
 kernel does not render final prose. `ViolationList` is the owned check result: zero items means pass,

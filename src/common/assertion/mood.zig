@@ -41,6 +41,7 @@ test "moods are complementary over the same predicate result" {
 }
 
 test "moods render as the only two grammar phrases" {
+    try std.testing.expectEqual(@as(usize, 2), std.meta.fields(Mood).len);
     try std.testing.expectFmt("should", "{f}", .{Mood.should});
     try std.testing.expectFmt("should not", "{f}", .{Mood.should_not});
 }
