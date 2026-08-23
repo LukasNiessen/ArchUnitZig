@@ -8,6 +8,8 @@ pub const ProjectedEdge = projected_edge.ProjectedEdge;
 pub const CycleProjectionError = Allocator.Error || mapped_edge.ProjectionError || error{
     EmptyProjectedCycle,
     DiscontinuousProjectedCycle,
+    EmptyProjectedEvidence,
+    MissingProjectedEdge,
 };
 
 /// One owned directed cycle in traversal order. Issue #18 supplies cycle discovery.
@@ -15,6 +17,26 @@ pub const ProjectedCycle = struct {
     edges: std.ArrayList(ProjectedEdge) = .empty,
 
     pub fn initClone(allocator: Allocator, source_edges: []const ProjectedEdge) CycleProjectionError!ProjectedCycle {
+        if (source_edges.len == 0) return error.EmptyProjectedCycle;
+        for (source_edges, 0..) |edge, index| {
+            const next = source_edges[(index + 1) % source_edges.len];
+            if (!std.mem.eql(u8, edge.target_label, next.source_label)) {
+                return error.DiscontinuousProjectedCycle;
+            }
+        }
+        var cycle: ProjectedCycle = .{};
+        errdefer cycle.deinit(allocator);
+        try cycle.edges.ensureTotalCapacity(allocator, source_edges.len);
+        for (source_edges) |edge| {
+            cycle.edges.appendAssumeCapacity(try edge.clone(allocator));
+        }
+        return cycle;
+    }
+
+    pub fn initClonePointers(
+        allocator: Allocator,
+        source_edges: []const *const ProjectedEdge,
+    ) CycleProjectionError!ProjectedCycle {
         if (source_edges.len == 0) return error.EmptyProjectedCycle;
         for (source_edges, 0..) |edge, index| {
             const next = source_edges[(index + 1) % source_edges.len];

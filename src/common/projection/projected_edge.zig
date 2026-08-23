@@ -58,6 +58,13 @@ pub const ProjectedEdge = struct {
         try self.cumulated_edges.append(allocator, cloned);
     }
 
+    pub fn appendEvidenceUnique(self: *ProjectedEdge, allocator: Allocator, edge: Edge) Allocator.Error!void {
+        for (self.cumulated_edges.items) |existing| {
+            if (existing.eql(edge)) return;
+        }
+        return self.appendEvidence(allocator, edge);
+    }
+
     pub fn evidence(self: *const ProjectedEdge) []const Edge {
         return self.cumulated_edges.items;
     }

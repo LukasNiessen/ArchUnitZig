@@ -11,6 +11,8 @@ pub const ProjectedNode = @import("projection/projected_node.zig").ProjectedNode
 pub const ProjectedNodes = @import("projection/projected_node.zig").ProjectedNodes;
 pub const ProjectionError = @import("projection/projected_edge.zig").ProjectionError;
 pub const projectEdges = @import("projection/project_edges.zig").projectEdges;
+pub const projectCycles = @import("projection/project_cycles.zig").projectCycles;
+pub const projectInternalCycles = @import("projection/project_cycles.zig").projectInternalCycles;
 pub const projectToNodes = @import("projection/project_nodes.zig").projectToNodes;
 pub const perEdge = @import("projection/edge_projections.zig").perEdge;
 pub const perExternalEdge = @import("projection/edge_projections.zig").perExternalEdge;
@@ -23,6 +25,7 @@ test {
     _ = @import("projection/edge_projections.zig");
     _ = @import("projection/mapped_edge.zig");
     _ = @import("projection/project_edges.zig");
+    _ = @import("projection/project_cycles.zig");
     _ = @import("projection/project_nodes.zig");
     _ = @import("projection/projected_cycle.zig");
     _ = @import("projection/projected_edge.zig");

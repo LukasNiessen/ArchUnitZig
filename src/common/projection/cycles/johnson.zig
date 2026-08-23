@@ -248,6 +248,19 @@ test "Johnson enumerates the dense four-vertex reference fixture" {
     }
 }
 
+test "iterative Johnson handles a deep cycle without call-stack recursion" {
+    const vertex_count = 5_000;
+    var adjacency = try Adjacency.init(std.testing.allocator, vertex_count);
+    defer adjacency.deinit(std.testing.allocator);
+    for (0..vertex_count) |vertex| {
+        try adjacency.add(std.testing.allocator, vertex, (vertex + 1) % vertex_count);
+    }
+    var cycles = try elementaryCycles(std.testing.allocator, &adjacency);
+    defer cycles.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), cycles.len());
+    try std.testing.expectEqual(vertex_count, cycles.items()[0].len);
+}
+
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var adjacency = try buildAdjacency(allocator, 3, &.{
         .{ 0, 1 }, .{ 1, 0 }, .{ 1, 2 }, .{ 2, 1 },
