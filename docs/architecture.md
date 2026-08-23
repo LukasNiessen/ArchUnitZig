@@ -37,7 +37,9 @@ while a missing resource remains a resource but is not an internal concrete targ
 retains the finest Zig identity in every case.
 
 Classified results keep the raw import name, graph-facing target, optional mapped source path,
-source location, and all three classification facts. An explicitly mapped project module changes
+source location, and all three classification facts. Normalized edges retain sets of target classes
+and availabilities alongside import kinds, so parallel references can union classification evidence
+without flattening it back to one external bit. An explicitly mapped project module changes
 the graph target from its raw alias to the resolved project-relative root and becomes internal.
 Package and unresolved aliases keep stable raw graph targets. A resolved `root` alias can be
 internal while its `root_module` kind remains observable; `std` and `builtin` remain compiler class.
@@ -231,6 +233,14 @@ an allowlist for every direct dependency of a selected subject; negative mood is
 Subjects are Zig nodes, while object candidates also include internal edge targets such as ZON and
 embedded files. A `file_dependency` violation groups owned projected target edges by source and
 therefore retains every concrete import kind and location.
+
+`dependOnExternalModules().matching(...)` is also available in both moods. By default it governs
+external named modules: resolved packages, unresolved aliases, and unavailable named mappings.
+Compiler modules, C headers, and missing/outside embedded resources are distinct opt-in categories.
+Repeated `matching` calls add OR alternatives. Positive mood is an allowlist and negative mood a
+blocklist within the enabled categories. A local module mapping is internal and cannot be mistaken
+for an external-module violation. External violations group owned projected edges by source and keep
+target class, availability, import kind, and source locations.
 
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
 `std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging
