@@ -13,4 +13,5 @@ pub const ImportKinds = extraction.ImportKinds;
 test {
     _ = std.testing;
     _ = @import("common/extraction.zig");
+    _ = @import("common/matching.zig");
 }
