@@ -8,6 +8,7 @@ const matching = @import("../../common/matching.zig");
 const projection = @import("../../common/projection.zig");
 const matching_files = @import("../assertion/matching_files.zig");
 const dependency_assertion = @import("../assertion/depend_on_files.zig");
+const external_assertion = @import("../assertion/depend_on_external_modules.zig");
 const file_cycles = @import("../projection/file_cycles.zig");
 
 const Allocator = std.mem.Allocator;
@@ -18,6 +19,7 @@ pub const Pattern = matching.Pattern;
 pub const PatternTarget = matching.PatternTarget;
 pub const ScopePattern = assertion.ScopePattern;
 pub const CheckOptions = fluentapi.CheckOptions;
+pub const ExternalModuleCategories = external_assertion.ExternalModuleCategories;
 
 pub const BuilderError = Allocator.Error || error{
     InvalidPattern,
@@ -524,6 +526,13 @@ pub const FilesShould = struct {
     pub fn dependOnFiles(self: *const FilesShould) BuilderError!FilesDependOnBuilder {
         return .{ .rule = try self.rule.clone() };
     }
+
+    pub fn dependOnExternalModules(self: *const FilesShould) BuilderError!FilesExternalModuleBuilder {
+        return .{
+            .rule = try self.rule.clone(),
+            .categories = external_assertion.defaultExternalModuleCategories(),
+        };
+    }
 };
 
 /// Positive terminal rule for elementary cycles in the selected internal file graph.
@@ -807,6 +816,211 @@ pub const FilesDependOn = struct {
     }
 };
 
+/// External dependency category stage. Named external modules are enabled by default; other Zig
+/// dependency classes require an explicit opt-in before matching completes the terminal.
+pub const FilesExternalModuleBuilder = struct {
+    rule: FileRuleContext,
+    categories: ExternalModuleCategories,
+
+    pub fn deinit(self: *FilesExternalModuleBuilder) void {
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn includingCompilerModules(self: *const FilesExternalModuleBuilder) BuilderError!FilesExternalModuleBuilder {
+        return self.withCategory(.compiler_module);
+    }
+
+    pub fn includingCHeaders(self: *const FilesExternalModuleBuilder) BuilderError!FilesExternalModuleBuilder {
+        return self.withCategory(.c_header);
+    }
+
+    pub fn includingResources(self: *const FilesExternalModuleBuilder) BuilderError!FilesExternalModuleBuilder {
+        return self.withCategory(.resource);
+    }
+
+    pub fn matching(
+        self: *const FilesExternalModuleBuilder,
+        patterns: []const Pattern,
+    ) BuilderError!FilesExternalModules {
+        return FilesExternalModules.init(&self.rule, self.categories, patterns);
+    }
+
+    fn withCategory(
+        self: *const FilesExternalModuleBuilder,
+        category: external_assertion.ExternalModuleCategory,
+    ) BuilderError!FilesExternalModuleBuilder {
+        var categories = self.categories;
+        categories.insert(category);
+        return .{ .rule = try self.rule.clone(), .categories = categories };
+    }
+};
+
+/// Checkable external-module allowlist/blocklist with OR-combined module patterns.
+pub const FilesExternalModules = struct {
+    rule: FileRuleContext,
+    categories: ExternalModuleCategories,
+    module_patterns: std.ArrayList(CompiledPattern) = .empty,
+
+    fn init(
+        source_rule: *const FileRuleContext,
+        categories: ExternalModuleCategories,
+        patterns: []const Pattern,
+    ) BuilderError!FilesExternalModules {
+        if (patterns.len == 0) return error.InvalidPattern;
+        var result = FilesExternalModules{
+            .rule = try source_rule.clone(),
+            .categories = categories,
+        };
+        errdefer result.deinit(source_rule.scope.allocator);
+        try result.appendPatterns(patterns);
+        return result;
+    }
+
+    pub fn deinit(self: *FilesExternalModules, allocator: Allocator) void {
+        _ = allocator;
+        const owner = self.rule.scope.allocator;
+        for (self.module_patterns.items) |*pattern| pattern.deinit(owner);
+        self.module_patterns.deinit(owner);
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    fn clone(self: *const FilesExternalModules) BuilderError!FilesExternalModules {
+        var result = FilesExternalModules{
+            .rule = try self.rule.clone(),
+            .categories = self.categories,
+        };
+        errdefer result.deinit(self.rule.scope.allocator);
+        try result.module_patterns.ensureTotalCapacity(
+            self.rule.scope.allocator,
+            self.module_patterns.items.len,
+        );
+        for (self.module_patterns.items) |*pattern| {
+            result.module_patterns.appendAssumeCapacity(try pattern.clone(self.rule.scope.allocator));
+        }
+        return result;
+    }
+
+    pub fn matching(self: *const FilesExternalModules, patterns: []const Pattern) BuilderError!FilesExternalModules {
+        if (patterns.len == 0) return error.InvalidPattern;
+        var result = try self.clone();
+        errdefer result.deinit(self.rule.scope.allocator);
+        try result.appendPatterns(patterns);
+        return result;
+    }
+
+    pub fn includingCompilerModules(self: *const FilesExternalModules) BuilderError!FilesExternalModules {
+        return self.withCategory(.compiler_module);
+    }
+
+    pub fn includingCHeaders(self: *const FilesExternalModules) BuilderError!FilesExternalModules {
+        return self.withCategory(.c_header);
+    }
+
+    pub fn includingResources(self: *const FilesExternalModules) BuilderError!FilesExternalModules {
+        return self.withCategory(.resource);
+    }
+
+    fn withCategory(
+        self: *const FilesExternalModules,
+        category: external_assertion.ExternalModuleCategory,
+    ) BuilderError!FilesExternalModules {
+        var result = try self.clone();
+        result.categories.insert(category);
+        return result;
+    }
+
+    fn appendPatterns(self: *FilesExternalModules, patterns: []const Pattern) BuilderError!void {
+        const allocator = self.rule.scope.allocator;
+        try self.module_patterns.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            self.module_patterns.appendAssumeCapacity(try CompiledPattern.initPattern(
+                allocator,
+                0,
+                pattern,
+                .path,
+            ));
+        }
+    }
+
+    pub fn description(self: *const FilesExternalModules, allocator: Allocator) Allocator.Error![]u8 {
+        const prefix = try self.rule.description(allocator);
+        defer allocator.free(prefix);
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        output.writer.print("{s} depend on external modules matching ", .{prefix}) catch return error.OutOfMemory;
+        if (self.module_patterns.items.len > 1) output.writer.writeByte('(') catch return error.OutOfMemory;
+        for (self.module_patterns.items, 0..) |pattern, index| {
+            if (index != 0) output.writer.writeAll(" or ") catch return error.OutOfMemory;
+            if (pattern.evidence.syntax == .regex) output.writer.writeAll("regex ") catch return error.OutOfMemory;
+            output.writer.print("\"{f}\"", .{std.zig.fmtString(pattern.evidence.expression)}) catch
+                return error.OutOfMemory;
+        }
+        if (self.module_patterns.items.len > 1) output.writer.writeByte(')') catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
+    pub fn check(self: *const FilesExternalModules, options: CheckOptions) anyerror!assertion.ViolationList {
+        var graph = try extractRuleGraph(&self.rule, options);
+        defer graph.deinit(options.allocator);
+        return self.checkGraph(options, &graph);
+    }
+
+    fn checkGraph(
+        self: *const FilesExternalModules,
+        options: CheckOptions,
+        graph: *const Graph,
+    ) anyerror!assertion.ViolationList {
+        var subjects = try self.rule.select(graph);
+        defer subjects.deinit();
+        if (subjects.len() == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelection(
+                &self.rule,
+                options.allocator,
+                "files.depend_on_external_modules.subject",
+            );
+        }
+        var edges = try projection.projectEdges(options.allocator, graph, projection.perExternalEdge());
+        defer edges.deinit(options.allocator);
+        var filters: std.ArrayList(*const Filter) = .empty;
+        defer filters.deinit(options.allocator);
+        try filters.ensureTotalCapacity(options.allocator, self.module_patterns.items.len);
+        for (self.module_patterns.items) |*pattern| filters.appendAssumeCapacity(&pattern.filter);
+
+        var category_edges: usize = 0;
+        var matching_targets: usize = 0;
+        for (edges.items()) |edge| {
+            if (!containsSelected(subjects.items(), edge.source_label) or
+                !external_assertion.edgeInCategories(edge, self.categories)) continue;
+            category_edges += 1;
+            if (try external_assertion.targetMatchesAny(
+                options.allocator,
+                edge.target_label,
+                filters.items,
+            )) matching_targets += 1;
+        }
+        if (category_edges == 0 or matching_targets == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelectionForCompiledPatterns(
+                self.module_patterns.items,
+                self.rule.mood(),
+                options.allocator,
+                "files.depend_on_external_modules.object",
+            );
+        }
+        return external_assertion.gatherExternalModuleDependencyViolations(
+            options.allocator,
+            edges.items(),
+            subjects.items(),
+            filters.items,
+            self.categories,
+            self.rule.mood(),
+        );
+    }
+};
+
 /// Negated mood stage. It is deliberately one mood flag over the same context and assertions.
 pub const FilesShouldNot = struct {
     rule: FileRuleContext,
@@ -850,6 +1064,13 @@ pub const FilesShouldNot = struct {
 
     pub fn dependOnFiles(self: *const FilesShouldNot) BuilderError!FilesDependOnBuilder {
         return .{ .rule = try self.rule.clone() };
+    }
+
+    pub fn dependOnExternalModules(self: *const FilesShouldNot) BuilderError!FilesExternalModuleBuilder {
+        return .{
+            .rule = try self.rule.clone(),
+            .categories = external_assertion.defaultExternalModuleCategories(),
+        };
     }
 };
 
@@ -906,6 +1127,31 @@ fn emptySelectionForScope(
         allocator,
         rule_id,
         scope.items(),
+        mood.isNegated(),
+    );
+    var violation = assertion.Violation.fromEmptyTestMove(&payload);
+    var result = assertion.ViolationList{};
+    result.appendMove(allocator, &violation) catch |failure| {
+        violation.deinit(allocator);
+        return failure;
+    };
+    return result;
+}
+
+fn emptySelectionForCompiledPatterns(
+    patterns: []const CompiledPattern,
+    mood: Mood,
+    allocator: Allocator,
+    rule_id: []const u8,
+) anyerror!assertion.ViolationList {
+    var evidence = ScopePatterns{};
+    defer evidence.deinit(allocator);
+    try evidence.values.ensureTotalCapacity(allocator, patterns.len);
+    for (patterns) |pattern| evidence.values.appendAssumeCapacity(try pattern.evidence.clone(allocator));
+    var payload = try assertion.EmptyTestViolation.init(
+        allocator,
+        rule_id,
+        evidence.items(),
         mood.isNegated(),
     );
     var violation = assertion.Violation.fromEmptyTestMove(&payload);
@@ -1638,6 +1884,7 @@ test "API to database fixture resolves module aliases and ZON objects with locat
     var allowed_terminal = try positive_builder.inPath(&.{
         .{ .glob = "src/database/**" },
         .{ .glob = "config.zon" },
+        .{ .glob = "src/main.zig" },
     });
     var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &allowed_terminal);
     defer erased.deinit();
@@ -1667,6 +1914,232 @@ test "depend on files terminal cleans up every allocation failure" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         exerciseDependOnAllocationFailures,
+        .{},
+    );
+}
+
+test "external module policy builder exists in both moods and category modifiers are explicit" {
+    try std.testing.expect(@hasDecl(FilesShould, "dependOnExternalModules"));
+    try std.testing.expect(@hasDecl(FilesShouldNot, "dependOnExternalModules"));
+    try std.testing.expect(!@hasDecl(FilesExternalModuleBuilder, "check"));
+    try std.testing.expect(@hasDecl(FilesExternalModuleBuilder, "matching"));
+    inline for ([_][]const u8{
+        "includingCompilerModules",
+        "includingCHeaders",
+        "includingResources",
+    }) |modifier| {
+        try std.testing.expect(@hasDecl(FilesExternalModuleBuilder, modifier));
+        try std.testing.expect(@hasDecl(FilesExternalModules, modifier));
+    }
+    try std.testing.expect(@hasDecl(FilesExternalModules, "matching"));
+    try std.testing.expect(!@hasDecl(FilesExternalModules, "should"));
+}
+
+fn externalPolicyGraph(allocator: Allocator) !Graph {
+    var graph: Graph = .{};
+    errdefer graph.deinit(allocator);
+    try graph.add(allocator, "src/client.zig", "src/client.zig", false, extraction.ImportKinds.initEmpty());
+    try graph.addClassifiedLocated(
+        allocator,
+        "src/client.zig",
+        "http_client",
+        true,
+        extraction.ImportKinds.initOne(.named_module),
+        .external,
+        .resolved,
+        &.{.{ .byte_offset = 0, .line = 1, .column = 1 }},
+    );
+    try graph.addClassifiedLocated(
+        allocator,
+        "src/client.zig",
+        "telemetry",
+        true,
+        extraction.ImportKinds.initOne(.named_module),
+        .external,
+        .unresolved,
+        &.{.{ .byte_offset = 20, .line = 2, .column = 1 }},
+    );
+    try graph.addClassifiedLocated(
+        allocator,
+        "src/client.zig",
+        "std",
+        true,
+        extraction.ImportKinds.initOne(.standard_library),
+        .compiler,
+        .resolved,
+        &.{.{ .byte_offset = 40, .line = 3, .column = 1 }},
+    );
+    graph.sort();
+    return graph;
+}
+
+fn externalSubject(allocator: Allocator, mood: Mood) !FileRuleContext {
+    var entry = try projectFiles(allocator, .{});
+    defer entry.deinit();
+    var client = try entry.inFile(&.{"src/client.zig"});
+    defer client.deinit();
+    return FileRuleContext.init(&client, mood);
+}
+
+test "external module terminals OR repeated patterns and keep compiler modules opt in" {
+    var graph = try externalPolicyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var rule = try externalSubject(std.testing.allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesExternalModuleBuilder{
+        .rule = try rule.clone(),
+        .categories = external_assertion.defaultExternalModuleCategories(),
+    };
+    defer builder.deinit();
+    var first = try builder.matching(&.{.{ .glob = "http_client" }});
+    defer first.deinit(std.testing.allocator);
+    var both = try first.matching(&.{.{ .regex = "^telemetry$" }});
+    defer both.deinit(std.testing.allocator);
+    var result = try both.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    try std.testing.expectEqual(@as(usize, 2), result.items()[0].external_module_dependency.items().len);
+    try std.testing.expectEqualStrings("http_client", result.items()[0].external_module_dependency.items()[0].target_label);
+    try std.testing.expectEqualStrings("telemetry", result.items()[0].external_module_dependency.items()[1].target_label);
+
+    var compiler_default = try builder.matching(&.{.{ .glob = "std" }});
+    defer compiler_default.deinit(std.testing.allocator);
+    var empty = try compiler_default.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer empty.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, empty.items()[0].kind());
+
+    var compiler_enabled = try compiler_default.includingCompilerModules();
+    defer compiler_enabled.deinit(std.testing.allocator);
+    var compiler_result = try compiler_enabled.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer compiler_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), compiler_result.items().len);
+    try std.testing.expectEqualStrings("std", compiler_result.items()[0].external_module_dependency.items()[0].target_label);
+}
+
+test "external module empty-object guard protects negated typos and allow-empty is explicit" {
+    var graph = try externalPolicyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var rule = try externalSubject(std.testing.allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesExternalModuleBuilder{
+        .rule = try rule.clone(),
+        .categories = external_assertion.defaultExternalModuleCategories(),
+    };
+    defer builder.deinit();
+    var terminal = try builder.matching(&.{.{ .glob = "misspelled" }});
+    defer terminal.deinit(std.testing.allocator);
+    var rejected = try terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer rejected.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_external_modules.object",
+        rejected.items()[0].empty_test.rule_id,
+    );
+    try std.testing.expect(rejected.items()[0].empty_test.is_negated);
+
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.allow_empty_tests = true;
+    var allowed = try terminal.checkGraph(options, &graph);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+test "external module fixture distinguishes local aliases packages unresolved and explicit categories" {
+    const modules = [_]fluentapi.ModuleOverride{
+        .{ .name = "database", .source_path = "src/database/root.zig" },
+        .{ .name = "http_client", .source_path = "vendor/http/root.zig", .origin = .package },
+    };
+    const units = [_]fluentapi.CompilationUnitOverride{.{
+        .id = "app",
+        .root_source_path = "src/main.zig",
+        .modules = &modules,
+    }};
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-dependencies" });
+    defer entry.deinit();
+    var api = try entry.inFolder(&.{.{ .glob = "src/api" }});
+    defer api.deinit();
+    var negated = try api.shouldNot();
+    defer negated.deinit();
+    var builder = try negated.dependOnExternalModules();
+    defer builder.deinit();
+    var package = try builder.matching(&.{.{ .glob = "http_client" }});
+    defer package.deinit(std.testing.allocator);
+    var named = try package.matching(&.{.{ .glob = "telemetry" }});
+    defer named.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = .{ .compilation_units = &units };
+    var named_result = try named.check(options);
+    defer named_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), named_result.items().len);
+    const named_edges = named_result.items()[0].external_module_dependency.items();
+    try std.testing.expectEqual(@as(usize, 2), named_edges.len);
+    try std.testing.expect(named_edges[0].evidence()[0].target_availabilities.contains(.resolved));
+    try std.testing.expect(named_edges[1].evidence()[0].target_availabilities.contains(.unresolved));
+    for (named_edges) |edge| try std.testing.expect(!std.mem.eql(u8, edge.target_label, "database"));
+
+    var compiler_builder = try builder.includingCompilerModules();
+    defer compiler_builder.deinit();
+    var compiler = try compiler_builder.matching(&.{
+        .{ .glob = "std" },
+        .{ .glob = "builtin" },
+    });
+    defer compiler.deinit(std.testing.allocator);
+    var compiler_result = try compiler.check(options);
+    defer compiler_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), compiler_result.items()[0].external_module_dependency.items().len);
+    for (compiler_result.items()[0].external_module_dependency.items()) |edge| {
+        try std.testing.expect(!std.mem.eql(u8, edge.target_label, "root"));
+    }
+
+    var header_builder = try builder.includingCHeaders();
+    defer header_builder.deinit();
+    var header = try header_builder.matching(&.{.{ .glob = "sqlite3.h" }});
+    defer header.deinit(std.testing.allocator);
+    var header_result = try header.check(options);
+    defer header_result.deinit(std.testing.allocator);
+    try std.testing.expect(header_result.items()[0].external_module_dependency.items()[0].evidence()[0].target_classes.contains(.c_header));
+
+    var resource_builder = try builder.includingResources();
+    defer resource_builder.deinit();
+    var resource = try resource_builder.matching(&.{.{ .glob = "missing.json" }});
+    defer resource.deinit(std.testing.allocator);
+    var resource_result = try resource.check(options);
+    defer resource_result.deinit(std.testing.allocator);
+    try std.testing.expect(resource_result.items()[0].external_module_dependency.items()[0].evidence()[0].target_classes.contains(.resource));
+}
+
+fn exerciseExternalTerminalAllocationFailures(allocator: Allocator) !void {
+    var graph = try externalPolicyGraph(allocator);
+    defer graph.deinit(allocator);
+    var rule = try externalSubject(allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesExternalModuleBuilder{
+        .rule = try rule.clone(),
+        .categories = external_assertion.defaultExternalModuleCategories(),
+    };
+    defer builder.deinit();
+    var first = try builder.matching(&.{.{ .glob = "http_client" }});
+    defer first.deinit(allocator);
+    var terminal = try first.matching(&.{.{ .regex = "telemetry" }});
+    defer terminal.deinit(allocator);
+    var result = try terminal.checkGraph(CheckOptions.init(allocator, std.testing.io), &graph);
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+}
+
+test "external module terminal cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseExternalTerminalAllocationFailures,
         .{},
     );
 }
