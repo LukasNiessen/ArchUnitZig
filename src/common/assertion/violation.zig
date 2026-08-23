@@ -7,6 +7,7 @@ const file_dependency_violation = @import("file_dependency_violation.zig");
 const external_dependency_violation = @import("external_module_dependency_violation.zig");
 const layer_dependency_violation = @import("layer_dependency_violation.zig");
 const matching_violation = @import("matching_violation.zig");
+const slice_dependency_violation = @import("slice_dependency_violation.zig");
 
 const Allocator = std.mem.Allocator;
 pub const EmptyTestViolation = empty_test.EmptyTestViolation;
@@ -16,6 +17,7 @@ pub const FileDependencyViolation = file_dependency_violation.FileDependencyViol
 pub const ExternalModuleDependencyViolation = external_dependency_violation.ExternalModuleDependencyViolation;
 pub const LayerDependencyViolation = layer_dependency_violation.LayerDependencyViolation;
 pub const MatchingViolation = matching_violation.MatchingViolation;
+pub const SliceDependencyViolation = slice_dependency_violation.SliceDependencyViolation;
 
 /// Closed, data-only architecture disagreement. Formatters exhaustively switch on this union in
 /// the testing layer; rule code never stores its final prose here.
@@ -27,9 +29,10 @@ pub const Violation = union(enum) {
     file_dependency: FileDependencyViolation,
     layer_dependency: LayerDependencyViolation,
     matching: MatchingViolation,
+    slice_dependency: SliceDependencyViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || custom_file_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || slice_dependency_violation.InitError || custom_file_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
@@ -73,6 +76,12 @@ pub const Violation = union(enum) {
         return result;
     }
 
+    pub fn fromSliceDependencyMove(payload: *SliceDependencyViolation) Violation {
+        const result = Violation{ .slice_dependency = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
     pub fn kind(self: Violation) Kind {
         return std.meta.activeTag(self);
     }
@@ -86,6 +95,7 @@ pub const Violation = union(enum) {
             .file_dependency => |value| .{ .file_dependency = try value.clone(allocator) },
             .layer_dependency => |value| .{ .layer_dependency = try value.clone(allocator) },
             .matching => |value| .{ .matching = try value.clone(allocator) },
+            .slice_dependency => |value| .{ .slice_dependency = try value.clone(allocator) },
         };
     }
 
@@ -98,6 +108,7 @@ pub const Violation = union(enum) {
             .file_dependency => |*value| value.deinit(allocator),
             .layer_dependency => |*value| value.deinit(allocator),
             .matching => |*value| value.deinit(allocator),
+            .slice_dependency => |*value| value.deinit(allocator),
         }
         self.* = undefined;
     }
@@ -112,6 +123,7 @@ pub const Violation = union(enum) {
             .file_dependency => |left| left.eql(other.file_dependency),
             .layer_dependency => |left| left.eql(other.layer_dependency),
             .matching => |left| left.eql(other.matching),
+            .slice_dependency => |left| left.eql(other.slice_dependency),
         };
     }
 };
@@ -125,6 +137,7 @@ fn formatterDispatchBoundary(violation: Violation) []const u8 {
         .file_dependency => "format-file-dependency-in-testing-layer",
         .layer_dependency => "format-layer-dependency-in-testing-layer",
         .matching => "format-matching-disagreement-in-testing-layer",
+        .slice_dependency => "format-slice-dependency-in-testing-layer",
     };
 }
 
