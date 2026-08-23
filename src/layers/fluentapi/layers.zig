@@ -446,6 +446,154 @@ test "layered architecture moves into Checkable with its description and owner a
     );
 }
 
+fn fixtureDefinitions(allocator: Allocator, strict: bool) !LayeredArchitecture {
+    var base = try projectLayers(allocator, .{
+        .locator = "test/fixtures/layers-basic",
+        .strict_unassigned_dependencies = strict,
+    });
+    defer base.deinit(allocator);
+    var presentation_stage = try base.layer("presentation");
+    defer presentation_stage.deinit();
+    var presentation = try presentation_stage.definedByFolder(.{ .glob = "src/presentation" });
+    defer presentation.deinit(allocator);
+    var application_stage = try presentation.layer("application");
+    defer application_stage.deinit();
+    var application = try application_stage.definedByFolder(.{ .glob = "src/application" });
+    defer application.deinit(allocator);
+    var domain_stage = try application.layer("domain");
+    defer domain_stage.deinit();
+    var domain = try domain_stage.definedByFolder(.{ .glob = "src/domain" });
+    defer domain.deinit(allocator);
+    var infrastructure_stage = try domain.layer("infrastructure");
+    defer infrastructure_stage.deinit();
+    return infrastructure_stage.definedByFolder(.{ .glob = "src/infrastructure" });
+}
+
+fn addAllowlist(
+    architecture: *const LayeredArchitecture,
+    source: []const u8,
+    targets: []const []const u8,
+) !LayeredArchitecture {
+    var stage = try architecture.whereLayer(source);
+    defer stage.deinit();
+    return stage.mayOnlyDependOnLayers(targets);
+}
+
+fn addBlocklist(
+    architecture: *const LayeredArchitecture,
+    source: []const u8,
+    targets: []const []const u8,
+) !LayeredArchitecture {
+    var stage = try architecture.whereLayer(source);
+    defer stage.deinit();
+    return stage.mayNotDependOnLayers(targets);
+}
+
+fn allowedFixtureArchitecture(allocator: Allocator, strict: bool) !LayeredArchitecture {
+    var definitions = try fixtureDefinitions(allocator, strict);
+    defer definitions.deinit(allocator);
+    var presentation = try addAllowlist(&definitions, "presentation", &.{"application"});
+    defer presentation.deinit(allocator);
+    var application = try addAllowlist(&presentation, "application", &.{"domain"});
+    defer application.deinit(allocator);
+    var domain = try addAllowlist(&application, "domain", &.{});
+    defer domain.deinit(allocator);
+    return addAllowlist(&domain, "infrastructure", &.{ "domain", "presentation" });
+}
+
+const FixtureModuleContext = struct {
+    modules: [1]fluentapi.ModuleOverride = .{.{
+        .name = "application",
+        .source_path = "src/application/root.zig",
+    }},
+    units: [1]fluentapi.CompilationUnitOverride = undefined,
+
+    fn prepare(self: *FixtureModuleContext) void {
+        self.units = .{.{
+            .id = "fixture",
+            .root_source_path = "src/presentation/alias_api.zig",
+            .modules = &self.modules,
+        }};
+    }
+
+    fn options(self: *const FixtureModuleContext) extraction.ModuleResolutionOverrides {
+        return .{ .compilation_units = &self.units };
+    }
+};
+
+test "four-layer fixture passes an allowlist and blocklist precedence reports concrete edge" {
+    var module_context = FixtureModuleContext{};
+    module_context.prepare();
+    var allowed = try allowedFixtureArchitecture(std.testing.allocator, false);
+    defer allowed.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = module_context.options();
+
+    var passing = try allowed.check(options);
+    defer passing.deinit(std.testing.allocator);
+    try std.testing.expect(passing.passes());
+
+    var blocked = try addBlocklist(&allowed, "infrastructure", &.{"presentation"});
+    defer blocked.deinit(std.testing.allocator);
+    var result = try blocked.check(options);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    const violation = result.items()[0].layer_dependency;
+    try std.testing.expectEqual(assertion.LayerPolicyKind.may_not_depend_on_layers, violation.policy);
+    try std.testing.expectEqualStrings("src/infrastructure/legacy.zig", violation.dependency.source_label);
+    try std.testing.expectEqualStrings("src/presentation/api.zig", violation.dependency.target_label);
+    try std.testing.expectEqual(@as(u32, 1), violation.dependency.evidence()[0].locationItems()[0].line);
+}
+
+test "fixture strict mode reports only the deliberately unassigned support edge" {
+    var module_context = FixtureModuleContext{};
+    module_context.prepare();
+    var architecture = try allowedFixtureArchitecture(std.testing.allocator, true);
+    defer architecture.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = module_context.options();
+    var result = try architecture.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    const violation = result.items()[0].layer_dependency;
+    try std.testing.expectEqual(assertion.LayerPolicyKind.unassigned_endpoint, violation.policy);
+    try std.testing.expectEqualStrings("src/application/service.zig", violation.dependency.source_label);
+    try std.testing.expectEqualStrings("src/support/logger.zig", violation.dependency.target_label);
+    try std.testing.expectEqualStrings("application", violation.source_layer.?);
+    try std.testing.expect(violation.target_layer == null);
+}
+
+test "resolved application module alias participates as a located internal layer edge" {
+    var module_context = FixtureModuleContext{};
+    module_context.prepare();
+    var base = try projectLayers(std.testing.allocator, .{ .locator = "test/fixtures/layers-basic" });
+    defer base.deinit(std.testing.allocator);
+    var presentation_stage = try base.layer("presentation");
+    defer presentation_stage.deinit();
+    var presentation = try presentation_stage.definedBy(.{ .glob = "src/presentation/alias_api.zig" });
+    defer presentation.deinit(std.testing.allocator);
+    var application_stage = try presentation.layer("application");
+    defer application_stage.deinit();
+    var application = try application_stage.definedByFolder(.{ .glob = "src/application" });
+    defer application.deinit(std.testing.allocator);
+    var block = try addBlocklist(&application, "presentation", &.{"application"});
+    defer block.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = module_context.options();
+    var result = try block.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    const evidence = result.items()[0].layer_dependency.dependency.evidence()[0];
+    try std.testing.expect(evidence.import_kinds.contains(.named_module));
+    try std.testing.expectEqual(@as(u32, 1), evidence.locationItems()[0].line);
+    try std.testing.expectEqualStrings("src/application/root.zig", evidence.target);
+}
+
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var architecture = try sampleArchitecture(allocator);
     defer architecture.deinit(allocator);

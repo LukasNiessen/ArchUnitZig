@@ -1,0 +1,7 @@
+.{
+    .name = .layers_basic_fixture,
+    .version = "0.0.0",
+    .fingerprint = 0xbbbbbbbbbbbbbbbb,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{ "build.zig.zon", "src" },
+}
