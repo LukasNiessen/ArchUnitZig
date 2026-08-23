@@ -2,6 +2,7 @@ pub const BuildGraphMode = @import("extraction/extraction_options.zig").BuildGra
 pub const Edge = @import("extraction/edge.zig").Edge;
 pub const ClassifiedReference = @import("extraction/classifier.zig").ClassifiedReference;
 pub const Graph = @import("extraction/graph.zig").Graph;
+pub const extractProjectGraph = @import("extraction/project_graph.zig").extractProjectGraph;
 pub const GraphCache = @import("extraction/graph_cache.zig").GraphCache;
 pub const GraphCacheKey = @import("extraction/graph_cache.zig").GraphCacheKey;
 pub const ExtractionOptions = @import("extraction/extraction_options.zig").ExtractionOptions;
@@ -57,6 +58,7 @@ test {
     _ = @import("extraction/import_kind.zig");
     _ = @import("extraction/module_resolver.zig");
     _ = @import("extraction/project_locator.zig");
+    _ = @import("extraction/project_graph.zig");
     _ = @import("extraction/relative_resolver.zig");
     _ = @import("extraction/source_files.zig");
     _ = @import("extraction/source_parser.zig");

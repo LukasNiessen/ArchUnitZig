@@ -101,6 +101,7 @@ pub const resolveRelativeReference = extraction.resolveRelativeReference;
 pub const resolveModuleReference = extraction.resolveModuleReference;
 pub const validateModuleResolutionOverrides = extraction.validateModuleResolutionOverrides;
 pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
+pub const extractProjectGraph = extraction.extractProjectGraph;
 pub const files = file_rules.files;
 pub const identity = projection.identity;
 pub const perEdge = projection.perEdge;
