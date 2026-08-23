@@ -1,9 +1,19 @@
 //! Public package root for ArchUnitZig.
 //!
-//! The user-facing API will be added incrementally as its contracts are implemented and tested.
+//! The rule-building API will be added incrementally as its contracts are implemented and tested.
 
 const std = @import("std");
+const extraction = @import("common/extraction.zig");
 
-test "the package root compiles" {
-    try std.testing.expect(true);
+pub const Edge = extraction.Edge;
+pub const Graph = extraction.Graph;
+pub const ImportKind = extraction.ImportKind;
+pub const ImportKinds = extraction.ImportKinds;
+
+test {
+    _ = std.testing;
+    _ = @import("common/extraction/edge.zig");
+    _ = @import("common/extraction/graph.zig");
+    _ = @import("common/extraction/identifier.zig");
+    _ = @import("common/extraction/import_kind.zig");
 }
