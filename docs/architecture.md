@@ -98,6 +98,16 @@ facts (selector group, glob/regex syntax, target, and exact/partial mode). This 
 within one selector and AND across selector calls, so the testing layer can explain a vacuous rule
 without retaining builders or compiled regular expressions.
 
+Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry the result
+allocator, empty-test/cache flags, per-check logging configuration, extraction exclusions, and an
+explicit Zig root/module map. These slices are borrowed only for the call; every returned
+`ViolationList` is owned by the supplied allocator.
+
+Heterogeneous rule collections use owned `Checkable` boxes. `fromMove` makes the transfer explicit
+and prevents a stored handle from dangling after a stack rule leaves scope. `checkAll` runs boxes in
+order, moves their violations into one result, and discards partial results when a later rule returns
+a user or technical error.
+
 ## Verification strategy
 
 1. Pure algorithms use hand-built graph fixtures and exhaustive unit tests.

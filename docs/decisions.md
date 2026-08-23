@@ -99,6 +99,22 @@ version, hash, and notices are recorded in `build.zig.zon` and `THIRD_PARTY_LICE
 glob wildcards follow the engine's Unicode-scalar semantics; identifiers otherwise remain UTF-8 byte
 slices. This is tested and documented rather than silently treating one byte as one character.
 
+### D011 — Owned type-erased checkables
+
+Concrete terminal rules expose `check(CheckOptions)` directly, preserving their precise error sets.
+For heterogeneous collections, `Checkable.fromMove` allocates an owned box, moves the rule into it,
+and invalidates the source. The erased vtable broadens errors to `anyerror` only at this collection
+boundary and destroys both the concrete rule and box through its original owner allocator.
+
+This was selected over a borrowed handle because Zig cannot encode the backing value's lifetime in
+the handle type. An owned box makes it impossible for a collection to outlive stack-backed rule
+storage. `checkAll` evaluates in order and moves each owned `ViolationList` into one result, cleaning
+partial results on the first error.
+
+Consequence: erasing a rule performs one allocation and requires an explicit `deinit`; callers that
+check one concrete rule pay neither cost. `CheckOptions.allocator` owns returned violation data,
+while borrowed exclusions and module overrides need only live through the check call.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
@@ -106,9 +122,3 @@ slices. This is tested and documented rather than silently treating one byte as 
 Sibling builders are immutable values. Zig needs safe storage for a runtime number of patterns while
 keeping an English-like chain and explicit allocation failure. Prototype arena/context-backed stage
 views, owned persistent nodes, and a deliberately mutable state machine before choosing.
-
-### D011 — Type-erased checks ([issue #6](https://github.com/LukasNiessen/ArchUnitZig/issues/6))
-
-One concrete rule can use compile-time duck typing. `assertAllPass` needs heterogeneous rules. Design
-a borrowed vtable handle or an owned alternative whose lifetime and violation ownership are difficult
-to misuse.
