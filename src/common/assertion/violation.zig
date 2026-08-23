@@ -2,6 +2,7 @@ const std = @import("std");
 
 const empty_test = @import("empty_test_violation.zig");
 const cycle_violation = @import("cycle_violation.zig");
+const custom_file_violation = @import("custom_file_violation.zig");
 const file_dependency_violation = @import("file_dependency_violation.zig");
 const external_dependency_violation = @import("external_module_dependency_violation.zig");
 const matching_violation = @import("matching_violation.zig");
@@ -9,6 +10,7 @@ const matching_violation = @import("matching_violation.zig");
 const Allocator = std.mem.Allocator;
 pub const EmptyTestViolation = empty_test.EmptyTestViolation;
 pub const CycleViolation = cycle_violation.CycleViolation;
+pub const CustomFileViolation = custom_file_violation.CustomFileViolation;
 pub const FileDependencyViolation = file_dependency_violation.FileDependencyViolation;
 pub const ExternalModuleDependencyViolation = external_dependency_violation.ExternalModuleDependencyViolation;
 pub const MatchingViolation = matching_violation.MatchingViolation;
@@ -17,16 +19,23 @@ pub const MatchingViolation = matching_violation.MatchingViolation;
 /// the testing layer; rule code never stores its final prose here.
 pub const Violation = union(enum) {
     cycle: CycleViolation,
+    custom_file: CustomFileViolation,
     empty_test: EmptyTestViolation,
     external_module_dependency: ExternalModuleDependencyViolation,
     file_dependency: FileDependencyViolation,
     matching: MatchingViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || custom_file_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
+    pub fn fromCustomFileMove(payload: *CustomFileViolation) Violation {
+        const result = Violation{ .custom_file = payload.* };
         payload.* = undefined;
         return result;
     }
@@ -62,6 +71,7 @@ pub const Violation = union(enum) {
     pub fn clone(self: Violation, allocator: Allocator) CloneError!Violation {
         return switch (self) {
             .cycle => |value| .{ .cycle = try value.clone(allocator) },
+            .custom_file => |value| .{ .custom_file = try value.clone(allocator) },
             .empty_test => |value| .{ .empty_test = try value.clone(allocator) },
             .external_module_dependency => |value| .{ .external_module_dependency = try value.clone(allocator) },
             .file_dependency => |value| .{ .file_dependency = try value.clone(allocator) },
@@ -72,6 +82,7 @@ pub const Violation = union(enum) {
     pub fn deinit(self: *Violation, allocator: Allocator) void {
         switch (self.*) {
             .cycle => |*value| value.deinit(allocator),
+            .custom_file => |*value| value.deinit(allocator),
             .empty_test => |*value| value.deinit(allocator),
             .external_module_dependency => |*value| value.deinit(allocator),
             .file_dependency => |*value| value.deinit(allocator),
@@ -84,6 +95,7 @@ pub const Violation = union(enum) {
         if (self.kind() != other.kind()) return false;
         return switch (self) {
             .cycle => |left| left.eql(other.cycle),
+            .custom_file => |left| left.eql(other.custom_file),
             .empty_test => |left| left.eql(other.empty_test),
             .external_module_dependency => |left| left.eql(other.external_module_dependency),
             .file_dependency => |left| left.eql(other.file_dependency),
@@ -95,6 +107,7 @@ pub const Violation = union(enum) {
 fn formatterDispatchBoundary(violation: Violation) []const u8 {
     return switch (violation) {
         .cycle => "format-cycle-in-testing-layer",
+        .custom_file => "format-custom-file-in-testing-layer",
         .empty_test => "format-empty-selection-in-testing-layer",
         .external_module_dependency => "format-external-module-dependency-in-testing-layer",
         .file_dependency => "format-file-dependency-in-testing-layer",

@@ -9,6 +9,7 @@ pub const ExtractionOptions = @import("extraction/extraction_options.zig").Extra
 pub const SourceReferences = @import("extraction/graph_normalizer.zig").SourceReferences;
 pub const ImportKind = @import("extraction/import_kind.zig").ImportKind;
 pub const ImportKinds = @import("extraction/import_kind.zig").ImportKinds;
+pub const ImportSummary = @import("extraction/import_kind.zig").ImportSummary;
 pub const LocatedProject = @import("extraction/project_locator.zig").LocatedProject;
 pub const CompilationUnitOverride = @import("extraction/module_resolver.zig").CompilationUnitOverride;
 pub const ModuleOrigin = @import("extraction/module_resolver.zig").ModuleOrigin;

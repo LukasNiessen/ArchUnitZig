@@ -8,27 +8,8 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 pub const ImportKind = import_kind.ImportKind;
 pub const ImportKinds = import_kind.ImportKinds;
+pub const ImportSummary = import_kind.ImportSummary;
 pub const TopLevelDeclarationCounts = source_parser.TopLevelDeclarationCounts;
-
-const import_kind_count = std.meta.fields(ImportKind).len;
-
-/// Value-only import facts. Repeated imports are counted individually while `kinds` keeps the
-/// distinct syntactic mechanisms used by the file.
-pub const ImportSummary = struct {
-    total: usize = 0,
-    kinds: ImportKinds = ImportKinds.initEmpty(),
-    counts: [import_kind_count]usize = [_]usize{0} ** import_kind_count,
-
-    pub fn count(self: ImportSummary, kind: ImportKind) usize {
-        return self.counts[@intFromEnum(kind)];
-    }
-
-    fn record(self: *ImportSummary, kind: ImportKind) void {
-        self.total += 1;
-        self.kinds.insert(kind);
-        self.counts[@intFromEnum(kind)] += 1;
-    }
-};
 
 /// Borrowed file data passed to a custom predicate.
 ///
