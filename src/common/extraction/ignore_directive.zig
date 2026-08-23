@@ -280,3 +280,27 @@ test "a trailing comma is a malformed target list" {
     );
     try std.testing.expectEqual(error.MissingTargetAfterComma, context.diagnostic.?.cause.?);
 }
+
+fn exerciseMalformedDirectiveAllocationFailures(allocator: Allocator) !void {
+    const source: [:0]const u8 = "// archunit: ignore dep.zig,\nconst dependency = @import(\"dep.zig\");\n";
+    var tree = try Ast.parse(allocator, source, .zig);
+    defer tree.deinit(allocator);
+    var context = common_error.ErrorContext.init(allocator);
+    defer context.deinit();
+
+    var directives = parseIgnoreDirectives(allocator, "src/main.zig", source, &tree, &context) catch |failure| {
+        if (failure == error.OutOfMemory) return failure;
+        try std.testing.expectEqual(error.InvalidIgnoreDirective, failure);
+        return;
+    };
+    directives.deinit(allocator);
+    return error.TestExpectedError;
+}
+
+test "malformed directive diagnostics clean up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseMalformedDirectiveAllocationFailures,
+        .{},
+    );
+}
