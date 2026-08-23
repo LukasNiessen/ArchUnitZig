@@ -481,9 +481,8 @@ external projection.
 
 The first `matching` call completes the terminal. Repeated calls and multiple patterns in one call
 join one OR group, unlike the AND chaining of file object selectors. Within enabled categories,
-positive mood is an allowlist and negative mood a blocklist. The terminal guards both an empty
-subject selection and an external object expression that matches no enabled target; this is
-especially important under negation, where a typo would otherwise pass vacuously.
+positive mood is an allowlist and negative mood a blocklist. Empty subject and object policy is
+refined by D030: in particular, absence is meaningful for a negative external blocklist.
 
 The pure gatherer groups disagreeing external projected edges by source. Each
 `external_module_dependency` violation owns those edges, including target class/availability sets,
@@ -523,3 +522,34 @@ subject selection uses the shared `EmptyTestViolation` contract before any callb
 Consequence: project-specific policies remain idiomatic `zig test` code, can safely inspect any file
 bytes and allocate temporary state, report stable structured evidence, and cannot accidentally turn
 callback failures or vacuous selections into passing architecture checks.
+
+### D030 — One guard enforces terminal non-vacuity with relational exceptions
+
+`guardEmptyTest` is the single assertion primitive for non-vacuity. It accepts a matched count,
+`allow_empty_tests`, stable rule id, selector evidence, and `Mood`. A non-zero count returns a
+continue signal. Zero returns either one owned `EmptyTestViolation` or, only with the explicit
+option, an owned empty result. File terminals share thin scope adapters that collect evidence only
+on the zero path; individual conditions no longer construct or bypass empty violations themselves.
+
+Every current file terminal guards its subject selection: `haveNoCycles`, `haveName`,
+`beInFolder`, `beInPath`, `dependOnFiles`, `dependOnExternalModules`, and `adhereTo`. Negation never
+changes subject non-vacuity. A real-fixture conformance test enumerates all seven entry points using
+the same misspelled folder, and pins rule id, mood, selector evidence, default violation, and explicit
+opt-out behavior.
+
+Relational objects depend on whether the candidate universe is closed. `dependOnFiles` selects from
+the finite internal project graph, so zero object matches are guarded in both moods: the library can
+prove that the requested file/folder/path does not exist. External module names are open-ended and
+absence is the purpose of a blocklist. Therefore negative `dependOnExternalModules` rules do not
+apply an object empty guard; no forbidden match is a pass, even when there are no external edges.
+Positive external rules guard only when selected subjects have zero dependencies in the enabled
+categories. When external candidates exist but none match the positive allowlist expression, the
+normal dependency violations are returned because they explain the disagreement better.
+
+`allow_empty_tests` affects only a guard that actually applies. It never suppresses ordinary
+matching, dependency, cycle, or custom-predicate violations. This decision supersedes D028's earlier
+choice to treat a negative external pattern with no observed match as an empty object expression.
+
+Consequence: misspelled subject selectors fail uniformly, internal relational typos remain
+defensive, external blocklists can state absence without false failures, and future terminals have
+one allocation-safe guard contract to adopt.

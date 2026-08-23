@@ -126,6 +126,7 @@ pub const formatCyclePath = testing_support.formatCyclePath;
 pub const gatherMatchingFileViolations = file_rules.gatherMatchingFileViolations;
 pub const gatherFileDependencyViolations = file_rules.gatherFileDependencyViolations;
 pub const gatherCustomFileViolations = file_rules.gatherCustomFileViolations;
+pub const guardEmptyTest = assertion.guardEmptyTest;
 pub const ExternalModuleCategory = file_rules.ExternalModuleCategory;
 pub const ExternalModuleCategories = file_rules.ExternalModuleCategories;
 pub const defaultExternalModuleCategories = file_rules.defaultExternalModuleCategories;
