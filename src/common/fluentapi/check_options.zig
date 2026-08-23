@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const module_resolver = @import("../extraction/module_resolver.zig");
+
 const Allocator = std.mem.Allocator;
 
 pub const LogLevel = enum {
@@ -16,17 +18,10 @@ pub const LoggingOptions = struct {
     include_violations: bool = true,
 };
 
-/// One named import supplied by the caller's Zig compilation context.
-pub const ModuleOverride = struct {
-    name: []const u8,
-    source_path: []const u8,
-};
-
-/// Static resolution context used instead of executing an analyzed project's `build.zig`.
-pub const ModuleResolutionOverrides = struct {
-    root_source_path: ?[]const u8 = null,
-    modules: []const ModuleOverride = &.{},
-};
+pub const CompilationUnitOverride = module_resolver.CompilationUnitOverride;
+pub const ModuleOrigin = module_resolver.ModuleOrigin;
+pub const ModuleOverride = module_resolver.ModuleOverride;
+pub const ModuleResolutionOverrides = module_resolver.ModuleResolutionOverrides;
 
 /// Per-check configuration. Every slice is borrowed for the duration of `check`; results allocate
 /// from `allocator` and must be released with that same allocator.
@@ -51,16 +46,20 @@ test "check options have safe deterministic defaults" {
     try std.testing.expectEqual(LogLevel.disabled, options.logging.level);
     try std.testing.expect(options.logging.include_violations);
     try std.testing.expectEqual(@as(usize, 0), options.extraction_exclusions.len);
-    try std.testing.expectEqual(@as(?[]const u8, null), options.module_resolution.root_source_path);
-    try std.testing.expectEqual(@as(usize, 0), options.module_resolution.modules.len);
+    try std.testing.expectEqual(@as(usize, 0), options.module_resolution.compilation_units.len);
 }
 
 test "check options carry borrowed extraction and Zig module context" {
     const exclusions = [_][]const u8{ "zig-cache/**", "generated/**" };
     const modules = [_]ModuleOverride{
         .{ .name = "domain", .source_path = "src/domain/root.zig" },
-        .{ .name = "support", .source_path = "test/support.zig" },
+        .{ .name = "support", .source_path = "../support/root.zig", .origin = .package },
     };
+    const compilation_units = [_]CompilationUnitOverride{.{
+        .id = "app",
+        .root_source_path = "src/main.zig",
+        .modules = &modules,
+    }};
     const options = CheckOptions{
         .allocator = std.testing.allocator,
         .allow_empty_tests = true,
@@ -68,8 +67,7 @@ test "check options carry borrowed extraction and Zig module context" {
         .logging = .{ .level = .debug, .include_violations = false },
         .extraction_exclusions = &exclusions,
         .module_resolution = .{
-            .root_source_path = "src/main.zig",
-            .modules = &modules,
+            .compilation_units = &compilation_units,
         },
     };
 
@@ -78,6 +76,8 @@ test "check options carry borrowed extraction and Zig module context" {
     try std.testing.expectEqual(LogLevel.debug, options.logging.level);
     try std.testing.expect(!options.logging.include_violations);
     try std.testing.expectEqualStrings("generated/**", options.extraction_exclusions[1]);
-    try std.testing.expectEqualStrings("src/main.zig", options.module_resolution.root_source_path.?);
-    try std.testing.expectEqualStrings("domain", options.module_resolution.modules[0].name);
+    try std.testing.expectEqualStrings("app", options.module_resolution.compilation_units[0].id);
+    try std.testing.expectEqualStrings("src/main.zig", options.module_resolution.compilation_units[0].root_source_path.?);
+    try std.testing.expectEqualStrings("domain", options.module_resolution.compilation_units[0].modules[0].name);
+    try std.testing.expectEqual(ModuleOrigin.package, options.module_resolution.compilation_units[0].modules[1].origin);
 }
