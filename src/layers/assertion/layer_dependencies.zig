@@ -114,6 +114,8 @@ pub const LayerDefinition = struct {
         return false;
     }
 
+    /// Appends borrowed evidence values. The destination owns only its backing storage and must not
+    /// deinitialize the individual `ScopePattern` values.
     pub fn appendScopeEvidence(
         self: *const LayerDefinition,
         allocator: Allocator,

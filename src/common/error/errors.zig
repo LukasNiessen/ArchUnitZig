@@ -6,6 +6,12 @@ pub const UserError = error{
     InvalidProjectPath,
     InvalidModuleOverride,
     InvalidIgnoreDirective,
+    InvalidLayerName,
+    DuplicateLayerName,
+    DuplicateLayerPolicy,
+    DuplicateLayerTarget,
+    EmptyBlocklist,
+    EmptyLayerDefinition,
 };
 
 pub const TechnicalError = error{
@@ -29,6 +35,12 @@ pub const UserCode = enum {
     invalid_project_path,
     invalid_module_override,
     invalid_ignore_directive,
+    invalid_layer_name,
+    duplicate_layer_name,
+    duplicate_layer_policy,
+    duplicate_layer_target,
+    empty_blocklist,
+    empty_layer_definition,
 
     pub fn toError(self: UserCode) UserError {
         return switch (self) {
@@ -39,6 +51,12 @@ pub const UserCode = enum {
             .invalid_project_path => error.InvalidProjectPath,
             .invalid_module_override => error.InvalidModuleOverride,
             .invalid_ignore_directive => error.InvalidIgnoreDirective,
+            .invalid_layer_name => error.InvalidLayerName,
+            .duplicate_layer_name => error.DuplicateLayerName,
+            .duplicate_layer_policy => error.DuplicateLayerPolicy,
+            .duplicate_layer_target => error.DuplicateLayerTarget,
+            .empty_blocklist => error.EmptyBlocklist,
+            .empty_layer_definition => error.EmptyLayerDefinition,
         };
     }
 };
@@ -72,6 +90,12 @@ pub fn categoryOf(failure: anyerror) ?ErrorCategory {
         error.InvalidProjectPath,
         error.InvalidModuleOverride,
         error.InvalidIgnoreDirective,
+        error.InvalidLayerName,
+        error.DuplicateLayerName,
+        error.DuplicateLayerPolicy,
+        error.DuplicateLayerTarget,
+        error.EmptyBlocklist,
+        error.EmptyLayerDefinition,
         => .user,
         error.FileSystemFailure,
         error.OutOfMemory,
@@ -90,6 +114,8 @@ test "user and technical error sets are distinguishable" {
     try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.InvalidPattern).?);
     try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.UnknownLayer).?);
     try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.InvalidIgnoreDirective).?);
+    try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.DuplicateLayerName).?);
+    try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.EmptyBlocklist).?);
     try std.testing.expectEqual(ErrorCategory.technical, categoryOf(error.FileSystemFailure).?);
     try std.testing.expectEqual(ErrorCategory.technical, categoryOf(error.ParserFailure).?);
     try std.testing.expectEqual(@as(?ErrorCategory, null), categoryOf(error.AccessDenied));
