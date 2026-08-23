@@ -30,7 +30,19 @@ pub const Graph = struct {
         external: bool,
         import_kinds: ImportKinds,
     ) AddError!void {
-        var candidate = try Edge.init(allocator, source, target, external, import_kinds);
+        return self.addLocated(allocator, source, target, external, import_kinds, &.{});
+    }
+
+    pub fn addLocated(
+        self: *Graph,
+        allocator: Allocator,
+        source: []const u8,
+        target: []const u8,
+        external: bool,
+        import_kinds: ImportKinds,
+        locations: []const edge_module.SourceLocation,
+    ) AddError!void {
+        var candidate = try Edge.initWithLocations(allocator, source, target, external, import_kinds, locations);
         errdefer candidate.deinit(allocator);
 
         for (self.edges.items) |*existing| {
@@ -41,12 +53,23 @@ pub const Graph = struct {
                 return error.ConflictingExternalClassification;
             }
 
+            try existing.mergeLocations(allocator, candidate.locationItems());
             existing.import_kinds.setUnion(candidate.import_kinds);
             candidate.deinit(allocator);
             return;
         }
 
         try self.edges.append(allocator, candidate);
+    }
+
+    pub fn sort(self: *Graph) void {
+        std.mem.sort(Edge, self.edges.items, {}, struct {
+            fn lessThan(_: void, left: Edge, right: Edge) bool {
+                const source_order = std.mem.order(u8, left.source, right.source);
+                if (source_order != .eq) return source_order == .lt;
+                return std.mem.order(u8, left.target, right.target) == .lt;
+            }
+        }.lessThan);
     }
 
     pub fn clone(self: Graph, allocator: Allocator) Allocator.Error!Graph {
