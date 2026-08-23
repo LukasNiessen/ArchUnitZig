@@ -222,6 +222,18 @@ and `never` are deterministic testable choices; `auto` requires the caller to de
 terminal and is suppressed by no-colour policy or a dumb terminal. Plain text therefore remains the
 safe default for redirected output and tools that cannot establish terminal capabilities.
 
+`expectPasses` and `assertPasses` are the native `zig test` edge. They accept a concrete terminal,
+run its `check`, obtain its owned description, delegate to `ResultFactory`, emit a failed result once,
+and return `error.ArchitectureViolation`. `AssertionOptions` carries the normal `CheckOptions`, result
+policy, and an optional borrowed failure writer. Without that writer, the helper locks stderr through
+the caller's `std.Io`; automatic ANSI is enabled only when stderr reports escape-code support. User
+and technical check errors propagate unchanged and produce no architecture-failure message.
+
+`assertAllPass` applies the same contract to owned heterogeneous `Checkable` handles. The erased
+vtable preserves an owned-description operation as well as `check`, so violations from different
+rules retain the correct sentence in one sorted report. Handles remain caller-owned, checks run in
+order, and the first analysis error discards all partial violation and description storage.
+
 The `empty_test` tag records a stable machine `rule_id`, negation, and scope-pattern
 facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
 patterns within one selector and AND across selector calls, so the testing layer can explain a

@@ -576,3 +576,27 @@ multi-violation ordering, Windows path normalization, colour modes, and unknown-
 
 Consequence: native and future testing adapters consume one deterministic report contract, cannot
 silently diverge in wording or order, and never need to own violation-specific formatting logic.
+
+### D032 — Native assertions use stderr plus a stable disagreement error
+
+Zig error values cannot carry an owned diagnostic message. `expectPasses` and `assertPasses`
+therefore follow the same shape as `std.testing`: on architecture disagreement they emit the shared
+`ResultFactory` message and return `error.ArchitectureViolation`. They are ordinary `!void` helpers;
+`assertPasses` is a naming alias, not a panic API. Their public edge is inline so the calling test
+remains present in the error return trace.
+
+`AssertionOptions` contains `CheckOptions`, result/colour policy, and an optional borrowed failure
+writer. The writer replaces stderr and makes custom-runner integration and exact tests deterministic.
+Otherwise stderr is locked through the explicit `std.Io`; `auto` colour enables ANSI only for an
+escape-code terminal. Diagnostic writes are best effort, as in `std.testing`, and a closed output
+stream does not change the semantic assertion error. A failure to analyze the project propagates its
+original error unchanged and emits no architecture disagreement.
+
+`Checkable` erasure includes an owned `description(Allocator)` operation. `assertAllPass` checks
+handles sequentially, retains every sentence with its owned violations, and calls grouped
+`ResultFactory` shaping once. It stops at the first user or technical error, cleans all partial data,
+and never deinitializes the caller's handles.
+
+Consequence: a normal Zig `test` block can use `try expectPasses(&rule, options)` without framework
+registration, diagnostics stay shared and attributable across heterogeneous rules, and callers keep
+explicit control of allocation, I/O, colour, and handle ownership.

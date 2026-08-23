@@ -14,6 +14,12 @@ pub const ResultOptions = struct {
     color: ColorOptions = .{},
 };
 
+/// Borrowed violations paired with the sentence of the rule that produced them.
+pub const ViolationGroup = struct {
+    violations: []const Violation,
+    rule_sentence: []const u8,
+};
+
 /// Owned framework-neutral architecture-test result.
 pub const TestResult = struct {
     passed: bool,
@@ -40,53 +46,82 @@ pub const ResultFactory = struct {
         rule_sentence: []const u8,
         options: ResultOptions,
     ) BuildError!TestResult {
-        if (!containsNonWhitespace(rule_sentence)) return error.InvalidRuleSentence;
-        if (violations.len == 0) return passingResult(allocator, rule_sentence, options.color);
+        return fromViolationGroups(
+            allocator,
+            &.{.{ .violations = violations, .rule_sentence = rule_sentence }},
+            rule_sentence,
+            options,
+        );
+    }
 
+    /// Shapes one result for heterogeneous rules without losing which sentence produced each
+    /// violation. Each structured violation still crosses `ViolationFactory` exactly once.
+    pub fn fromViolationGroups(
+        allocator: Allocator,
+        groups: []const ViolationGroup,
+        passing_sentence: []const u8,
+        options: ResultOptions,
+    ) BuildError!TestResult {
+        if (!containsNonWhitespace(passing_sentence)) return error.InvalidRuleSentence;
         var formatted: std.ArrayList(FormattedViolation) = .empty;
         defer {
             for (formatted.items) |*item| item.deinit(allocator);
             formatted.deinit(allocator);
         }
-        try formatted.ensureTotalCapacity(allocator, violations.len);
-        for (violations) |violation| {
-            formatted.appendAssumeCapacity(try violation_factory.ViolationFactory.fromViolation(
-                allocator,
-                violation,
-                rule_sentence,
-            ));
+        for (groups) |group| {
+            if (!containsNonWhitespace(group.rule_sentence)) return error.InvalidRuleSentence;
+            for (group.violations) |violation| {
+                var item = try violation_factory.ViolationFactory.fromViolation(
+                    allocator,
+                    violation,
+                    group.rule_sentence,
+                );
+                formatted.append(allocator, item) catch |failure| {
+                    item.deinit(allocator);
+                    return failure;
+                };
+            }
         }
-        std.mem.sort(FormattedViolation, formatted.items, {}, formattedLessThan);
-
-        var output: std.Io.Writer.Allocating = .init(allocator);
-        defer output.deinit();
-        var title_buffer: [96]u8 = undefined;
-        const noun = if (violations.len == 1) "violation" else "violations";
-        const title = std.fmt.bufPrint(
-            &title_buffer,
-            "Architecture rule failed with {d} {s}:",
-            .{ violations.len, noun },
-        ) catch unreachable;
-        color.writeStyled(&output.writer, options.color, .bold_red, title) catch
-            return error.OutOfMemory;
-        output.writer.writeAll("\n\n") catch return error.OutOfMemory;
-
-        for (formatted.items, 0..) |item, index| {
-            if (index != 0) output.writer.writeAll("\n\n") catch return error.OutOfMemory;
-            var heading_buffer: [128]u8 = undefined;
-            const heading = std.fmt.bufPrint(
-                &heading_buffer,
-                "{d}. {s}",
-                .{ index + 1, item.heading },
-            ) catch unreachable;
-            color.writeStyled(&output.writer, options.color, .yellow, heading) catch
-                return error.OutOfMemory;
-            output.writer.writeAll("\n   ") catch return error.OutOfMemory;
-            writeIndented(&output.writer, item.details) catch return error.OutOfMemory;
-        }
-        return .{ .passed = false, .message = try output.toOwnedSlice() };
+        if (formatted.items.len == 0) return passingResult(allocator, passing_sentence, options.color);
+        return failingResult(allocator, formatted.items, options.color);
     }
 };
+
+fn failingResult(
+    allocator: Allocator,
+    formatted: []FormattedViolation,
+    color_options: ColorOptions,
+) Allocator.Error!TestResult {
+    std.mem.sort(FormattedViolation, formatted, {}, formattedLessThan);
+
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    var title_buffer: [96]u8 = undefined;
+    const noun = if (formatted.len == 1) "violation" else "violations";
+    const title = std.fmt.bufPrint(
+        &title_buffer,
+        "Architecture rule failed with {d} {s}:",
+        .{ formatted.len, noun },
+    ) catch unreachable;
+    color.writeStyled(&output.writer, color_options, .bold_red, title) catch
+        return error.OutOfMemory;
+    output.writer.writeAll("\n\n") catch return error.OutOfMemory;
+
+    for (formatted, 0..) |item, index| {
+        if (index != 0) output.writer.writeAll("\n\n") catch return error.OutOfMemory;
+        var heading_buffer: [128]u8 = undefined;
+        const heading = std.fmt.bufPrint(
+            &heading_buffer,
+            "{d}. {s}",
+            .{ index + 1, item.heading },
+        ) catch unreachable;
+        color.writeStyled(&output.writer, color_options, .yellow, heading) catch
+            return error.OutOfMemory;
+        output.writer.writeAll("\n   ") catch return error.OutOfMemory;
+        writeIndented(&output.writer, item.details) catch return error.OutOfMemory;
+    }
+    return .{ .passed = false, .message = try output.toOwnedSlice() };
+}
 
 fn passingResult(
     allocator: Allocator,
@@ -191,6 +226,55 @@ test "multiple violations sort before numbering and render one plain golden mess
     );
 }
 
+test "heterogeneous groups retain each producing rule sentence in one result" {
+    var matching_value = try matchingViolation(std.testing.allocator, "src/order.zig");
+    defer matching_value.deinit(std.testing.allocator);
+    var empty_value = try emptyViolation(std.testing.allocator, "files.have_no_cycles");
+    defer empty_value.deinit(std.testing.allocator);
+    var result = try ResultFactory.fromViolationGroups(
+        std.testing.allocator,
+        &.{
+            .{
+                .violations = &.{matching_value},
+                .rule_sentence = "service files should have name *_service.zig",
+            },
+            .{
+                .violations = &.{empty_value},
+                .rule_sentence = "domain files should have no cycles",
+            },
+        },
+        "all 2 architecture rules",
+        .{},
+    );
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        "Architecture rule failed with 2 violations:\n\n" ++
+            "1. Empty test violation\n" ++
+            "   Rule: domain files should have no cycles\n" ++
+            "   Rule id: files.have_no_cycles\n" ++
+            "   Reason: no files matched the rule scope\n" ++
+            "   Selectors: unfiltered project scope\n\n" ++
+            "2. File pattern violation\n" ++
+            "   Rule: service files should have name *_service.zig\n" ++
+            "   File: src/order.zig:1:1\n" ++
+            "   Reason: filename does not match required glob \"*_service.zig\" (exact)",
+        result.message,
+    );
+}
+
+test "heterogeneous groups validate even empty rule descriptions" {
+    try std.testing.expectError(
+        error.InvalidRuleSentence,
+        ResultFactory.fromViolationGroups(
+            std.testing.allocator,
+            &.{.{ .violations = &.{}, .rule_sentence = "  " }},
+            "all architecture rules",
+            .{},
+        ),
+    );
+}
+
 test "colour is exact when forced and auto-disables for inappropriate outputs" {
     var violation = try emptyViolation(std.testing.allocator, "files.have_no_cycles");
     defer violation.deinit(std.testing.allocator);
@@ -223,10 +307,19 @@ fn exerciseResultAllocationFailures(allocator: Allocator) !void {
     defer matching_value.deinit(allocator);
     var empty_value = try emptyViolation(allocator, "files.have_name");
     defer empty_value.deinit(allocator);
-    var result = try ResultFactory.fromViolations(
+    var result = try ResultFactory.fromViolationGroups(
         allocator,
-        &.{ matching_value, empty_value },
-        "project files should have name *_service.zig",
+        &.{
+            .{
+                .violations = &.{matching_value},
+                .rule_sentence = "project files should have name *_service.zig",
+            },
+            .{
+                .violations = &.{empty_value},
+                .rule_sentence = "project files should have no cycles",
+            },
+        },
+        "all 2 architecture rules",
         .{ .color = .{ .mode = .always } },
     );
     defer result.deinit(allocator);
