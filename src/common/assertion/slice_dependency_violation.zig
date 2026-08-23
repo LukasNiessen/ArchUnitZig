@@ -11,12 +11,18 @@ pub const InitError = projected_edge.ProjectionError || error{
     InvalidSliceDependencyEvidence,
 };
 
+pub const SliceRuleKind = enum {
+    contain_dependency,
+    adhere_to_diagram,
+};
+
 /// Owned evidence for a required missing or forbidden present dependency between two slices.
 pub const SliceDependencyViolation = struct {
     source_slice: []const u8,
     target_slice: []const u8,
     mood: Mood,
     dependency: ?ProjectedEdge,
+    rule: SliceRuleKind,
 
     pub fn initClone(
         allocator: Allocator,
@@ -25,13 +31,52 @@ pub const SliceDependencyViolation = struct {
         mood: Mood,
         dependency: ?ProjectedEdge,
     ) InitError!SliceDependencyViolation {
+        return initWithRule(
+            allocator,
+            source_slice,
+            target_slice,
+            mood,
+            dependency,
+            .contain_dependency,
+        );
+    }
+
+    pub fn initDiagramClone(
+        allocator: Allocator,
+        source_slice: []const u8,
+        target_slice: []const u8,
+        dependency: ?ProjectedEdge,
+    ) InitError!SliceDependencyViolation {
+        return initWithRule(
+            allocator,
+            source_slice,
+            target_slice,
+            .should,
+            dependency,
+            .adhere_to_diagram,
+        );
+    }
+
+    fn initWithRule(
+        allocator: Allocator,
+        source_slice: []const u8,
+        target_slice: []const u8,
+        mood: Mood,
+        dependency: ?ProjectedEdge,
+        rule: SliceRuleKind,
+    ) InitError!SliceDependencyViolation {
         if (!containsNonWhitespace(source_slice) or !containsNonWhitespace(target_slice)) {
             return error.EmptySliceLabel;
         }
-        if ((mood == .should and dependency != null) or
-            (mood == .should_not and dependency == null))
-        {
-            return error.InvalidSliceDependencyEvidence;
+        switch (rule) {
+            .contain_dependency => {
+                if ((mood == .should and dependency != null) or
+                    (mood == .should_not and dependency == null))
+                {
+                    return error.InvalidSliceDependencyEvidence;
+                }
+            },
+            .adhere_to_diagram => if (mood != .should) return error.InvalidSliceDependencyEvidence,
         }
         if (dependency) |edge| {
             if (!std.mem.eql(u8, source_slice, edge.source_label) or
@@ -50,6 +95,7 @@ pub const SliceDependencyViolation = struct {
             .target_slice = owned_target,
             .mood = mood,
             .dependency = if (dependency) |edge| try edge.clone(allocator) else null,
+            .rule = rule,
         };
     }
 
@@ -57,12 +103,13 @@ pub const SliceDependencyViolation = struct {
         self: SliceDependencyViolation,
         allocator: Allocator,
     ) InitError!SliceDependencyViolation {
-        return initClone(
+        return initWithRule(
             allocator,
             self.source_slice,
             self.target_slice,
             self.mood,
             self.dependency,
+            self.rule,
         );
     }
 
@@ -77,6 +124,7 @@ pub const SliceDependencyViolation = struct {
         if (!std.mem.eql(u8, self.source_slice, other.source_slice) or
             !std.mem.eql(u8, self.target_slice, other.target_slice) or
             self.mood != other.mood or
+            self.rule != other.rule or
             (self.dependency == null) != (other.dependency == null))
         {
             return false;
@@ -132,6 +180,16 @@ test "slice dependency violations own present and absent dependency evidence" {
     try std.testing.expect(forbidden.eql(cloned));
     try std.testing.expectEqual(@as(u32, 2), forbidden.dependency.?.evidence()[0].locationItems()[0].line);
     try std.testing.expect(required.dependency == null);
+    try std.testing.expectEqual(SliceRuleKind.contain_dependency, forbidden.rule);
+
+    var unexpected = try SliceDependencyViolation.initDiagramClone(
+        std.testing.allocator,
+        "api",
+        "retrieval",
+        edge,
+    );
+    defer unexpected.deinit(std.testing.allocator);
+    try std.testing.expectEqual(SliceRuleKind.adhere_to_diagram, unexpected.rule);
 }
 
 test "slice dependency violation evidence and labels are validated" {

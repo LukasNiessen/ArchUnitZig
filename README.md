@@ -43,6 +43,29 @@ Use `should().containDependency(...)` for a required edge. Explicit regex captur
 and identity projections are also available; their ownership and orphan/external semantics are
 recorded in [D036](docs/decisions.md#d036--slices-are-single-label-projections-with-explicit-orphan-and-external-semantics).
 
+A checked-in component diagram can be a strict architecture contract:
+
+```zig
+const diagram =
+    "@startuml\n" ++
+    "component [api] as A\n" ++
+    "component [services] as S\n" ++
+    "A --> S\n" ++
+    "@enduml\n";
+
+var positive = try features.should();
+defer positive.deinit();
+var internal_only = try positive.ignoringExternalSlices();
+defer internal_only.deinit();
+var diagram_rule = try internal_only.adhereToDiagram(diagram);
+defer diagram_rule.deinit(std.testing.allocator);
+```
+
+`adhereToDiagramInFile(path)` reads only when checked. `features.toPlantUml(options)` and
+`features.exportAsPlantUml(options, path)` generate the reverse diagram deterministically. The
+supported subset and strict missing/extra relationship behavior are recorded in
+[D037](docs/decisions.md#d037--plantuml-validation-is-a-strict-diagnosable-component-subset).
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.

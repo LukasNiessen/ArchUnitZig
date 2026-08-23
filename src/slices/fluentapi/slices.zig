@@ -4,8 +4,10 @@ const assertion = @import("../../common/assertion.zig");
 const common_error = @import("../../common/error.zig");
 const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
+const diagram_assertion = @import("../assertion/diagram_adherence.zig");
 const slice_assertion = @import("../assertion/slice_dependency.zig");
 const slice_projection = @import("../projection/slice_projection.zig");
+const plantuml = @import("../uml/plantuml.zig");
 
 const Allocator = std.mem.Allocator;
 pub const CheckOptions = fluentapi.CheckOptions;
@@ -13,10 +15,12 @@ pub const Graph = extraction.Graph;
 pub const Mood = assertion.Mood;
 pub const SliceProjection = slice_projection.SliceProjection;
 pub const SliceSuffix = slice_projection.SliceSuffix;
+pub const DiagramAdherenceOptions = diagram_assertion.DiagramAdherenceOptions;
 
 pub const BuilderError = slice_projection.InitError || error{
     InvalidProjectPath,
     EmptySliceLabel,
+    InvalidDiagram,
 };
 
 pub const ProjectSliceOptions = struct {
@@ -95,11 +99,70 @@ pub const ProjectSlices = struct {
     }
 
     pub fn should(self: *const ProjectSlices) BuilderError!SlicesShould {
-        return .{ .rule = try SliceRuleContext.init(self, .should) };
+        return .{ .rule = try SliceRuleContext.init(self, .should), .diagram_options = .{} };
     }
 
     pub fn shouldNot(self: *const ProjectSlices) BuilderError!SlicesShouldNot {
         return .{ .rule = try SliceRuleContext.init(self, .should_not) };
+    }
+
+    /// Extracts once and renders the real slice graph as deterministic PlantUML.
+    pub fn toPlantUml(self: *const ProjectSlices, options: CheckOptions) anyerror![]u8 {
+        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        defer diagnostics.deinit();
+        var graph = try extraction.extractProjectGraph(
+            options.allocator,
+            options.io,
+            self.project_locator,
+            options.working_directory,
+            options.extraction,
+            options.clear_cache,
+            &diagnostics,
+        );
+        defer graph.deinit(options.allocator);
+        return self.toPlantUmlGraph(options.allocator, &graph);
+    }
+
+    pub fn toPlantUmlGraph(
+        self: *const ProjectSlices,
+        allocator: Allocator,
+        graph: *const Graph,
+    ) (slice_projection.ProjectionError || plantuml.RenderError)![]u8 {
+        var labels = try slice_projection.projectSliceLabels(allocator, graph, &self.projection);
+        defer labels.deinit(allocator);
+        var edges = try slice_projection.projectSliceEdges(allocator, graph, &self.projection);
+        defer edges.deinit(allocator);
+        return plantuml.renderPlantUml(allocator, labels.items(), edges.items());
+    }
+
+    pub fn exportAsPlantUml(
+        self: *const ProjectSlices,
+        options: CheckOptions,
+        output_path: []const u8,
+    ) anyerror!void {
+        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        defer diagnostics.deinit();
+        var graph = try extraction.extractProjectGraph(
+            options.allocator,
+            options.io,
+            self.project_locator,
+            options.working_directory,
+            options.extraction,
+            options.clear_cache,
+            &diagnostics,
+        );
+        defer graph.deinit(options.allocator);
+        var labels = try slice_projection.projectSliceLabels(options.allocator, &graph, &self.projection);
+        defer labels.deinit(options.allocator);
+        var edges = try slice_projection.projectSliceEdges(options.allocator, &graph, &self.projection);
+        defer edges.deinit(options.allocator);
+        return plantuml.exportPlantUml(
+            options.allocator,
+            options.io,
+            labels.items(),
+            edges.items(),
+            output_path,
+        );
     }
 
     fn description(self: *const ProjectSlices, allocator: Allocator) Allocator.Error![]u8 {
@@ -140,6 +203,7 @@ const SliceRuleContext = struct {
 
 pub const SlicesShould = struct {
     rule: SliceRuleContext,
+    diagram_options: DiagramAdherenceOptions,
 
     pub fn deinit(self: *SlicesShould) void {
         self.rule.deinit();
@@ -152,6 +216,40 @@ pub const SlicesShould = struct {
         target_slice: []const u8,
     ) BuilderError!SliceDependencyRule {
         return SliceDependencyRule.init(&self.rule, source_slice, target_slice);
+    }
+
+    pub fn ignoringOrphanSlices(self: *const SlicesShould) BuilderError!SlicesShould {
+        return .{
+            .rule = try self.rule.clone(),
+            .diagram_options = .{
+                .ignore_orphan_slices = true,
+                .ignore_external_slices = self.diagram_options.ignore_external_slices,
+            },
+        };
+    }
+
+    pub fn ignoringExternalSlices(self: *const SlicesShould) BuilderError!SlicesShould {
+        return .{
+            .rule = try self.rule.clone(),
+            .diagram_options = .{
+                .ignore_orphan_slices = self.diagram_options.ignore_orphan_slices,
+                .ignore_external_slices = true,
+            },
+        };
+    }
+
+    pub fn adhereToDiagram(
+        self: *const SlicesShould,
+        text: []const u8,
+    ) BuilderError!DiagramAdherenceRule {
+        return DiagramAdherenceRule.init(&self.rule, .inline_text, text, self.diagram_options);
+    }
+
+    pub fn adhereToDiagramInFile(
+        self: *const SlicesShould,
+        path: []const u8,
+    ) BuilderError!DiagramAdherenceRule {
+        return DiagramAdherenceRule.init(&self.rule, .file_path, path, self.diagram_options);
     }
 };
 
@@ -169,6 +267,158 @@ pub const SlicesShouldNot = struct {
         target_slice: []const u8,
     ) BuilderError!SliceDependencyRule {
         return SliceDependencyRule.init(&self.rule, source_slice, target_slice);
+    }
+};
+
+const DiagramSourceKind = enum { inline_text, file_path };
+
+const DiagramSource = union(DiagramSourceKind) {
+    inline_text: []u8,
+    file_path: []u8,
+
+    fn init(
+        allocator: Allocator,
+        kind: DiagramSourceKind,
+        value: []const u8,
+    ) BuilderError!DiagramSource {
+        if (!containsNonWhitespace(value)) return error.InvalidDiagram;
+        return switch (kind) {
+            .inline_text => .{ .inline_text = try allocator.dupe(u8, value) },
+            .file_path => .{ .file_path = try allocator.dupe(u8, value) },
+        };
+    }
+
+    fn deinit(self: *DiagramSource, allocator: Allocator) void {
+        switch (self.*) {
+            inline else => |value| allocator.free(value),
+        }
+        self.* = undefined;
+    }
+
+    fn description(self: *const DiagramSource) []const u8 {
+        return switch (self.*) {
+            .inline_text => "inline PlantUML diagram",
+            .file_path => |path| path,
+        };
+    }
+};
+
+/// Positive terminal validating strict relationship equality against inline or file PlantUML.
+pub const DiagramAdherenceRule = struct {
+    rule: SliceRuleContext,
+    source: DiagramSource,
+    options: DiagramAdherenceOptions,
+
+    fn init(
+        source_rule: *const SliceRuleContext,
+        kind: DiagramSourceKind,
+        value: []const u8,
+        options: DiagramAdherenceOptions,
+    ) BuilderError!DiagramAdherenceRule {
+        var rule = try source_rule.clone();
+        errdefer rule.deinit();
+        return .{
+            .rule = rule,
+            .source = try DiagramSource.init(rule.scope.allocator, kind, value),
+            .options = options,
+        };
+    }
+
+    pub fn deinit(self: *DiagramAdherenceRule, allocator: Allocator) void {
+        _ = allocator;
+        const owner = self.rule.scope.allocator;
+        self.source.deinit(owner);
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const DiagramAdherenceRule, allocator: Allocator) Allocator.Error![]u8 {
+        const scope_description = try self.rule.scope.description(allocator);
+        defer allocator.free(scope_description);
+        return std.fmt.allocPrint(
+            allocator,
+            "{s} should adhere to {s}",
+            .{ scope_description, self.source.description() },
+        );
+    }
+
+    pub fn check(
+        self: *const DiagramAdherenceRule,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
+        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        defer diagnostics.deinit();
+        var graph = try extraction.extractProjectGraph(
+            options.allocator,
+            options.io,
+            self.rule.scope.project_locator,
+            options.working_directory,
+            options.extraction,
+            options.clear_cache,
+            &diagnostics,
+        );
+        defer graph.deinit(options.allocator);
+        return self.checkGraph(options, &graph);
+    }
+
+    pub fn checkGraph(
+        self: *const DiagramAdherenceRule,
+        options: CheckOptions,
+        graph: *const Graph,
+    ) anyerror!assertion.ViolationList {
+        var labels = try slice_projection.projectSliceLabels(
+            options.allocator,
+            graph,
+            &self.rule.scope.projection,
+        );
+        defer labels.deinit(options.allocator);
+        if (try assertion.guardEmptyTest(
+            options.allocator,
+            labels.len(),
+            options.allow_empty_tests,
+            "slices.adhere_to_diagram",
+            &.{},
+            .should,
+        )) |early| return early;
+
+        var owned_text: ?[:0]u8 = null;
+        defer if (owned_text) |value| options.allocator.free(value);
+        const diagram_text: []const u8 = switch (self.source) {
+            .inline_text => |text| text,
+            .file_path => |path| blk: {
+                owned_text = std.Io.Dir.cwd().readFileAllocOptions(
+                    options.io,
+                    path,
+                    options.allocator,
+                    .limited(std.math.maxInt(usize)),
+                    .of(u8),
+                    0,
+                ) catch |failure| return if (failure == error.OutOfMemory)
+                    error.OutOfMemory
+                else
+                    error.FileSystemFailure;
+                break :blk owned_text.?;
+            },
+        };
+        var parsed = try plantuml.parsePlantUml(options.allocator, diagram_text);
+        defer parsed.deinit(options.allocator);
+        const diagram = switch (parsed) {
+            .diagram => |*value| value,
+            .invalid => return error.InvalidDiagram,
+        };
+        var edges = try slice_projection.projectSliceEdges(
+            options.allocator,
+            graph,
+            &self.rule.scope.projection,
+        );
+        defer edges.deinit(options.allocator);
+        return diagram_assertion.gatherDiagramAdherenceViolations(
+            options.allocator,
+            edges.items(),
+            labels.items(),
+            diagram,
+            self.options,
+        );
     }
 };
 
@@ -461,6 +711,174 @@ test "feature-sliced fixture exposes isolated allowed forbidden and external com
     try std.testing.expectEqual(@as(usize, 1), result.items().len);
 }
 
+test "strict inline PlantUML reports unexpected actual and missing declared relationships" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try featureScope(std.testing.allocator);
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var rule = try positive.adhereToDiagram(
+        "@startuml\n" ++
+            "component [api] as A\n" ++
+            "component [services] as S\n" ++
+            "component [models] as M\n" ++
+            "A --> S\n" ++
+            "S --> M\n" ++
+            "@enduml",
+    );
+    defer rule.deinit(std.testing.allocator);
+    var result = try rule.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 3), result.items().len);
+    try std.testing.expectEqualStrings("retrieval", result.items()[0].slice_dependency.target_slice);
+    try std.testing.expectEqualStrings("std", result.items()[1].slice_dependency.target_slice);
+    try std.testing.expectEqualStrings("models", result.items()[2].slice_dependency.target_slice);
+    try std.testing.expect(result.items()[2].slice_dependency.dependency == null);
+}
+
+test "diagram modifiers are branchable and deliberately ignore external and undeclared slices" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try featureScope(std.testing.allocator);
+    defer scope.deinit();
+    var base = try scope.should();
+    defer base.deinit();
+    var orphans = try base.ignoringOrphanSlices();
+    defer orphans.deinit();
+    var external = try base.ignoringExternalSlices();
+    defer external.deinit();
+    var combined = try orphans.ignoringExternalSlices();
+    defer combined.deinit();
+    try std.testing.expect(!base.diagram_options.ignore_orphan_slices);
+    try std.testing.expect(!base.diagram_options.ignore_external_slices);
+    try std.testing.expect(orphans.diagram_options.ignore_orphan_slices);
+    try std.testing.expect(!orphans.diagram_options.ignore_external_slices);
+    try std.testing.expect(!external.diagram_options.ignore_orphan_slices);
+    try std.testing.expect(external.diagram_options.ignore_external_slices);
+
+    var rule = try combined.adhereToDiagram(
+        "@startuml\ncomponent [api]\ncomponent [services]\n[api] -> [services]\n@enduml",
+    );
+    defer rule.deinit(std.testing.allocator);
+    var result = try rule.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+}
+
+test "diagram source validation is lazy and the empty guard precedes file I/O" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try featureScope(std.testing.allocator);
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    try std.testing.expectError(error.InvalidDiagram, positive.adhereToDiagram(" "));
+
+    var malformed = try positive.adhereToDiagram("@startuml\ncomponent api\n@enduml");
+    defer malformed.deinit(std.testing.allocator);
+    try std.testing.expectError(
+        error.InvalidDiagram,
+        malformed.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph),
+    );
+    var missing_file = try positive.adhereToDiagramInFile("missing/architecture.puml");
+    defer missing_file.deinit(std.testing.allocator);
+    try std.testing.expectError(
+        error.FileSystemFailure,
+        missing_file.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph),
+    );
+
+    var base = try projectSlices(std.testing.allocator, .{});
+    defer base.deinit();
+    var unmatched = try base.definedBy("missing/(**)/");
+    defer unmatched.deinit();
+    var unmatched_positive = try unmatched.should();
+    defer unmatched_positive.deinit();
+    var guarded = try unmatched_positive.adhereToDiagramInFile("missing/architecture.puml");
+    defer guarded.deinit(std.testing.allocator);
+    var guarded_result = try guarded.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph);
+    defer guarded_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, guarded_result.items()[0].kind());
+    try std.testing.expectEqualStrings("slices.adhere_to_diagram", guarded_result.items()[0].empty_test.rule_id);
+}
+
+test "file-backed fixture diagram passes when external slices are deliberately ignored" {
+    var base = try projectSlices(std.testing.allocator, .{ .locator = "test/fixtures/slices-basic" });
+    defer base.deinit();
+    var scope = try base.definedBy("src/features/(**)/");
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var internal_only = try positive.ignoringExternalSlices();
+    defer internal_only.deinit();
+    var rule = try internal_only.adhereToDiagramInFile(
+        "test/fixtures/slices-basic/docs/architecture.puml",
+    );
+    defer rule.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try rule.check(options);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+}
+
+test "generated PlantUML is deterministic exported and strictly round-trip valid" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try featureScope(std.testing.allocator);
+    defer scope.deinit();
+    const rendered = try scope.toPlantUmlGraph(std.testing.allocator, &graph);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "component [orphan]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "component [std]") != null);
+
+    var parsed = try plantuml.parsePlantUml(std.testing.allocator, rendered);
+    defer parsed.deinit(std.testing.allocator);
+    const intended = switch (parsed) {
+        .diagram => |*value| value,
+        .invalid => return error.TestExpectedEqual,
+    };
+    var labels = try slice_projection.projectSliceLabels(std.testing.allocator, &graph, &scope.projection);
+    defer labels.deinit(std.testing.allocator);
+    var edges = try slice_projection.projectSliceEdges(std.testing.allocator, &graph, &scope.projection);
+    defer edges.deinit(std.testing.allocator);
+    var round_trip = try diagram_assertion.gatherDiagramAdherenceViolations(
+        std.testing.allocator,
+        edges.items(),
+        labels.items(),
+        intended,
+        .{},
+    );
+    defer round_trip.deinit(std.testing.allocator);
+    try std.testing.expect(round_trip.passes());
+
+    var fixture_base = try projectSlices(std.testing.allocator, .{ .locator = "test/fixtures/slices-basic" });
+    defer fixture_base.deinit();
+    var fixture = try fixture_base.definedBy("src/features/(**)/");
+    defer fixture.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    const output_path = try std.fs.path.join(std.testing.allocator, &.{ root, "nested", "generated.puml" });
+    defer std.testing.allocator.free(output_path);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    try fixture.exportAsPlantUml(options, output_path);
+    const exported = try std.Io.Dir.cwd().readFileAllocOptions(
+        std.testing.io,
+        output_path,
+        std.testing.allocator,
+        .limited(std.math.maxInt(usize)),
+        .of(u8),
+        0,
+    );
+    defer std.testing.allocator.free(exported);
+    const generated = try fixture.toPlantUml(options);
+    defer std.testing.allocator.free(generated);
+    try std.testing.expectEqualStrings(generated, exported);
+}
+
 test "slice terminal owns a stable sentence and can move into Checkable" {
     var scope = try featureScope(std.testing.allocator);
     defer scope.deinit();
@@ -499,6 +917,27 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     try std.testing.expectEqual(@as(usize, 1), result.items().len);
 }
 
+fn exerciseDiagramAllocationFailures(allocator: Allocator) !void {
+    var graph = try sampleGraph(allocator);
+    defer graph.deinit(allocator);
+    var scope = try featureScope(allocator);
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var modified = try positive.ignoringExternalSlices();
+    defer modified.deinit();
+    var rule = try modified.adhereToDiagram(
+        "@startuml\ncomponent [api]\ncomponent [services]\n[api] -> [services]\n@enduml",
+    );
+    defer rule.deinit(allocator);
+    var result = try rule.checkGraph(CheckOptions.init(allocator, std.testing.io), &graph);
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    const rendered = try scope.toPlantUmlGraph(allocator, &graph);
+    defer allocator.free(rendered);
+}
+
 test "slice fluent builders and checks clean up every allocation failure" {
     try std.testing.checkAllAllocationFailures(std.testing.allocator, exerciseAllocationFailures, .{});
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, exerciseDiagramAllocationFailures, .{});
 }

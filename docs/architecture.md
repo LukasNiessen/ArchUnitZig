@@ -324,6 +324,20 @@ absent required edge without fabricated import evidence, while negative mood rep
 forbidden edge and its locations. A projection matching no internal labels uses the universal empty
 guard; a non-empty projection does not require every label named by a negative absence rule to exist.
 
+PlantUML is a small owned boundary over that same slice graph. The parser recognizes component
+declarations, optional aliases, two directed arrows, comments, and one start/end block. Every other
+statement produces a structured one-based line/column diagnostic. Successful parsing resolves
+aliases to sorted canonical names and pairs. Diagram rules compare both relationship sets: extra
+actual edges retain projected import evidence, while missing actual edges carry only the expected
+source and target.
+
+Positive diagram stages can independently ignore actual edges involving undeclared diagram nodes or
+purely external slice targets. Mixed internal/external evidence stays governed. Inline bytes and file
+paths are owned during construction but consumed only by terminal checks, after non-vacuity is
+established. Reverse generation uses projected labels as components and projected edges as arrows,
+including isolated internal labels and external targets, so parsing the generated UTF-8 and applying
+strict validation returns no disagreement.
+
 Every terminal applies one shared empty-test guard to its subject selection. Zero subjects produce
 one `empty_test` violation by default, including under negation; `allow_empty_tests` returns an empty
 result instead. Direct file-dependency rules also guard a zero-match object scope in both moods,

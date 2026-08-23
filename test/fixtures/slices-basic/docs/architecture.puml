@@ -1,0 +1,10 @@
+@startuml Slices fixture
+  component [api] as A
+  component [models] as M
+  component [orphan]
+  component [retrieval] as R
+  component [services] as S
+  A --> R
+  A --> S
+  S --> M
+@enduml
