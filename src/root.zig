@@ -19,6 +19,7 @@ pub const EmptyTestViolation = assertion.EmptyTestViolation;
 pub const EnumerationOptions = extraction.EnumerationOptions;
 pub const ErrorCategory = common_error.ErrorCategory;
 pub const ErrorContext = common_error.ErrorContext;
+pub const FileResolutionStatus = extraction.FileResolutionStatus;
 pub const Graph = extraction.Graph;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
@@ -42,6 +43,7 @@ pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
 pub const UserError = common_error.UserError;
 pub const RegexFactory = matching.RegexFactory;
+pub const ResolvedReference = extraction.ResolvedReference;
 pub const ScopePattern = assertion.ScopePattern;
 pub const SourceLocation = extraction.SourceLocation;
 pub const Strictness = extraction.Strictness;
@@ -55,6 +57,7 @@ pub const checkAll = fluentapi.checkAll;
 pub const categoryOfError = common_error.categoryOf;
 pub const locateProject = extraction.locateProject;
 pub const parseSource = extraction.parseSource;
+pub const resolveRelativeReference = extraction.resolveRelativeReference;
 pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
 
 test "public facade builds and runs pattern filters" {
