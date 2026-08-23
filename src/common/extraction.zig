@@ -1,4 +1,5 @@
 pub const Edge = @import("extraction/edge.zig").Edge;
+pub const ClassifiedReference = @import("extraction/classifier.zig").ClassifiedReference;
 pub const Graph = @import("extraction/graph.zig").Graph;
 pub const ImportKind = @import("extraction/import_kind.zig").ImportKind;
 pub const ImportKinds = @import("extraction/import_kind.zig").ImportKinds;
@@ -11,9 +12,14 @@ pub const ModuleResolutionStatus = @import("extraction/module_resolver.zig").Mod
 pub const ResolvedModuleReference = @import("extraction/module_resolver.zig").ResolvedModuleReference;
 pub const ProjectMarker = @import("extraction/project_locator.zig").ProjectMarker;
 pub const EnumerationOptions = @import("extraction/source_files.zig").EnumerationOptions;
+pub const FileResolutionInput = @import("extraction/classifier.zig").FileResolutionInput;
 pub const SourceFiles = @import("extraction/source_files.zig").SourceFiles;
+pub const ResolutionInput = @import("extraction/classifier.zig").ResolutionInput;
+pub const TargetAvailability = @import("extraction/classifier.zig").TargetAvailability;
+pub const TargetClass = @import("extraction/classifier.zig").TargetClass;
 pub const default_excluded_directories = @import("extraction/source_files.zig").default_excluded_directories;
 pub const enumerateSourceFiles = @import("extraction/source_files.zig").enumerateSourceFiles;
+pub const classifyReference = @import("extraction/classifier.zig").classifyReference;
 pub const DependencyReference = @import("extraction/source_parser.zig").DependencyReference;
 pub const DiagnosticKind = @import("extraction/source_parser.zig").DiagnosticKind;
 pub const ParseResult = @import("extraction/source_parser.zig").ParseResult;
@@ -30,6 +36,7 @@ pub const locateProject = @import("extraction/project_locator.zig").locateProjec
 
 test {
     _ = @import("path.zig");
+    _ = @import("extraction/classifier.zig");
     _ = @import("extraction/edge.zig");
     _ = @import("extraction/graph.zig");
     _ = @import("extraction/identifier.zig");

@@ -203,6 +203,25 @@ Consequence: resolution is deterministic and context-correct without running unt
 or build integrations must supply the compilation contexts they actually test; issue #12 can then
 classify the explicit statuses without reconstructing build semantics.
 
+### D017 — Target class, availability, and externality are orthogonal
+
+One enum cannot honestly describe every Zig dependency. A project-owned `@embedFile` target is both
+internal and a resource; a missing one is still a resource but has no internal concrete file. A
+resolved `root` alias targets a project file while remaining identifiable as `root_module`.
+ArchUnitZig therefore records target class (`internal`, `external`, `compiler`, `resource`, or
+`c_header`), availability (`resolved`, `unresolved`, `missing`, or `outside_project`), the shared
+`external` boolean, and `ImportKind` independently.
+
+The owned classified result retains raw target text, graph-facing target, optional mapped source
+path, and source location. Resolved project module aliases promote the graph target to their
+project-relative source path. Package and unresolved modules keep their stable raw names, avoiding
+machine-specific package-cache paths in shared graphs. Missing/outside mappings keep diagnostic
+paths without becoming internal.
+
+Consequence: the sibling-compatible graph can continue to consume `external` and import-kind sets,
+while Zig diagnostics and future selectors can distinguish compiler aliases, resources, headers,
+missing paths, and explicit module promotion without reverse engineering a flattened target.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
