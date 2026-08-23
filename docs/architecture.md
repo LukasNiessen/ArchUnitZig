@@ -170,8 +170,8 @@ and evidence. The resulting values remain valid after the source graph and mappe
 `projectToNodes` deep-clones its evidence as well. Raw self-edges retain isolated nodes but do not
 appear as incoming or outgoing dependencies. External targets are omitted by default, while their
 source's outgoing evidence stays visible; opting in creates the external target node and incoming
-evidence. Owned `ProjectedCycle` values require a closed ordered edge path. Issue #18 supplies cycle
-discovery over these values; the ownership model does not depend on a particular algorithm.
+evidence. Owned `ProjectedCycle` values require a closed ordered edge path. Iterative Tarjan/Johnson
+cycle discovery produces deterministic directed cycles over these values.
 
 The standard `perEdge`, `perInternalEdge`, and `perExternalEdge` mapping factories drop raw self-edges;
 `identity` retains them deliberately. Internal/external factories inspect only the graph's canonical
@@ -188,15 +188,22 @@ Class-oriented parity is not a goal when the underlying concept is absent.
 Every rule is lazy and returns violations as values. User/technical errors use Zig error unions and
 diagnostic context. The testing edge turns non-empty violations into a normal `zig test` failure.
 
+File scopes are allocator-bound owned values. `projectFiles` and `files` clone an optional locator;
+each `withName`, `inFolder`, `inPath`, or `inFile` call returns a deep independent scope. Every scope
+must be deinitialized, and `clone` is required instead of shallow struct assignment when another
+owner is wanted. This makes branching safe without an arena parent lifetime. Selector construction
+compiles patterns but performs no I/O. Its pure `select(graph)` boundary consumes a normalized graph;
+terminal `check` remains the only fluent operation that may locate and extract a project.
+
 `Violation` is an owned, closed tagged union of structured facts. Each domain rule adds an evidence
 shape only when it lands, and the testing formatter must then handle the new tag exhaustively. The
 kernel does not render final prose. `ViolationList` is the owned check result: zero items means pass,
 while `appendMove` makes ownership transfer explicit and clone/deinitialisation cover every payload.
 
 The first tag is `empty_test`. It records a stable machine `rule_id`, negation, and scope-pattern
-facts (selector group, glob/regex syntax, target, and exact/partial mode). This preserves OR patterns
-within one selector and AND across selector calls, so the testing layer can explain a vacuous rule
-without retaining builders or compiled regular expressions.
+facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
+patterns within one selector and AND across selector calls, so the testing layer can explain a
+vacuous rule without retaining builders or compiled regular expressions.
 
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry the result
 allocator, empty-test/cache controls, per-check logging configuration, and the centralized extraction
