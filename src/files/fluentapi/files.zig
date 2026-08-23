@@ -8,6 +8,7 @@ const matching = @import("../../common/matching.zig");
 const Allocator = std.mem.Allocator;
 pub const Filter = matching.Filter;
 pub const Graph = extraction.Graph;
+pub const Mood = assertion.Mood;
 pub const Pattern = matching.Pattern;
 pub const PatternTarget = matching.PatternTarget;
 pub const ScopePattern = assertion.ScopePattern;
@@ -258,6 +259,16 @@ pub const FilesScope = struct {
         return self.selectors.items[selector_index].alternatives.items.len;
     }
 
+    /// The positive grammar stage. The returned value owns an independent clone of this scope.
+    pub fn should(self: *const FilesScope) BuilderError!FilesShould {
+        return .{ .rule = try FileRuleContext.init(self, .should) };
+    }
+
+    /// The negated grammar stage. The returned value owns an independent clone of this scope.
+    pub fn shouldNot(self: *const FilesScope) BuilderError!FilesShouldNot {
+        return .{ .rule = try FileRuleContext.init(self, .should_not) };
+    }
+
     /// Returns an independent owned copy of the user-facing selector facts in chain order.
     pub fn scopePatterns(self: *const FilesScope, allocator: Allocator) Allocator.Error!ScopePatterns {
         var result: ScopePatterns = .{};
@@ -333,6 +344,15 @@ pub const FilesScope = struct {
         return result;
     }
 
+    /// Allocates a stable English-like description from owned selector evidence. The caller frees
+    /// the returned slice with `allocator`.
+    pub fn description(self: *const FilesScope, allocator: Allocator) Allocator.Error![]u8 {
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        self.writeDescription(&output.writer) catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
     fn selectPatterns(
         self: *const FilesScope,
         patterns: []const Pattern,
@@ -352,6 +372,129 @@ pub const FilesScope = struct {
         };
         return result;
     }
+
+    fn writeDescription(self: *const FilesScope, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.writeAll("project files");
+        for (self.selectors.items) |selector| {
+            const alternatives = selector.alternatives.items;
+            std.debug.assert(alternatives.len != 0);
+            try writer.writeAll(", ");
+            try writer.writeAll(selectorPhrase(alternatives[0].evidence));
+            try writer.writeByte(' ');
+            if (alternatives.len > 1) try writer.writeByte('(');
+            for (alternatives, 0..) |alternative, index| {
+                if (index != 0) try writer.writeAll(" or ");
+                if (alternative.evidence.syntax == .regex) try writer.writeAll("regex ");
+                try writer.print("\"{f}\"", .{std.zig.fmtString(alternative.evidence.expression)});
+            }
+            if (alternatives.len > 1) try writer.writeByte(')');
+        }
+    }
+};
+
+/// Shared owned data behind both public mood stages. Predicate implementations consume this one
+/// context and call `mood.holds`; positive and negative assertion logic is never duplicated.
+pub const FileRuleContext = struct {
+    scope: FilesScope,
+    mood_value: Mood,
+
+    fn init(scope: *const FilesScope, selected_mood: Mood) BuilderError!FileRuleContext {
+        return .{ .scope = try scope.clone(), .mood_value = selected_mood };
+    }
+
+    pub fn deinit(self: *FileRuleContext) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn clone(self: *const FileRuleContext) BuilderError!FileRuleContext {
+        return .{ .scope = try self.scope.clone(), .mood_value = self.mood_value };
+    }
+
+    pub fn mood(self: *const FileRuleContext) Mood {
+        return self.mood_value;
+    }
+
+    pub fn predicateHolds(self: *const FileRuleContext, predicate_result: bool) bool {
+        return self.mood_value.holds(predicate_result);
+    }
+
+    pub fn select(self: *const FileRuleContext, graph: *const Graph) Allocator.Error!SelectedFiles {
+        return self.scope.select(graph);
+    }
+
+    pub fn scopePatterns(self: *const FileRuleContext, allocator: Allocator) Allocator.Error!ScopePatterns {
+        return self.scope.scopePatterns(allocator);
+    }
+
+    pub fn description(self: *const FileRuleContext, allocator: Allocator) Allocator.Error![]u8 {
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        self.scope.writeDescription(&output.writer) catch return error.OutOfMemory;
+        output.writer.print(", {f}", .{self.mood_value}) catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+};
+
+/// Positive mood stage. Future positive-only predicates can live here without becoming available
+/// after `shouldNot`.
+pub const FilesShould = struct {
+    rule: FileRuleContext,
+
+    pub fn deinit(self: *FilesShould) void {
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn mood(self: *const FilesShould) Mood {
+        return self.rule.mood();
+    }
+
+    pub fn predicateHolds(self: *const FilesShould, predicate_result: bool) bool {
+        return self.rule.predicateHolds(predicate_result);
+    }
+
+    pub fn select(self: *const FilesShould, graph: *const Graph) Allocator.Error!SelectedFiles {
+        return self.rule.select(graph);
+    }
+
+    pub fn scopePatterns(self: *const FilesShould, allocator: Allocator) Allocator.Error!ScopePatterns {
+        return self.rule.scopePatterns(allocator);
+    }
+
+    pub fn description(self: *const FilesShould, allocator: Allocator) Allocator.Error![]u8 {
+        return self.rule.description(allocator);
+    }
+};
+
+/// Negated mood stage. It is deliberately one mood flag over the same context and assertions.
+pub const FilesShouldNot = struct {
+    rule: FileRuleContext,
+
+    pub fn deinit(self: *FilesShouldNot) void {
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn mood(self: *const FilesShouldNot) Mood {
+        return self.rule.mood();
+    }
+
+    pub fn predicateHolds(self: *const FilesShouldNot, predicate_result: bool) bool {
+        return self.rule.predicateHolds(predicate_result);
+    }
+
+    pub fn select(self: *const FilesShouldNot, graph: *const Graph) Allocator.Error!SelectedFiles {
+        return self.rule.select(graph);
+    }
+
+    pub fn scopePatterns(self: *const FilesShouldNot, allocator: Allocator) Allocator.Error!ScopePatterns {
+        return self.rule.scopePatterns(allocator);
+    }
+
+    pub fn description(self: *const FilesShouldNot, allocator: Allocator) Allocator.Error![]u8 {
+        return self.rule.description(allocator);
+    }
 };
 
 pub fn projectFiles(allocator: Allocator, options: ProjectOptions) BuilderError!FilesScope {
@@ -364,6 +507,15 @@ pub fn files(allocator: Allocator, options: ProjectOptions) BuilderError!FilesSc
 
 fn mapPatternFailure(failure: anyerror) BuilderError {
     return if (failure == error.OutOfMemory) error.OutOfMemory else error.InvalidPattern;
+}
+
+fn selectorPhrase(pattern: ScopePattern) []const u8 {
+    return switch (pattern.target) {
+        .filename => "with name",
+        .path_without_filename => "in folder",
+        .path => if (pattern.syntax == .literal) "in file" else "in path",
+        .declaration_name => unreachable,
+    };
 }
 
 test "entry points own optional locators without touching the filesystem" {
@@ -491,8 +643,127 @@ test "invalid locators and selector alternatives are clear user errors" {
 test "scope stage type keeps selection before future mood and terminal stages" {
     try std.testing.expect(@hasDecl(FilesScope, "withName"));
     try std.testing.expect(@hasDecl(FilesScope, "inFolder"));
+    try std.testing.expect(@hasDecl(FilesScope, "should"));
+    try std.testing.expect(@hasDecl(FilesScope, "shouldNot"));
     try std.testing.expect(!@hasDecl(SelectedFiles, "withName"));
     try std.testing.expect(!@hasDecl(SelectedFiles, "inFolder"));
+}
+
+test "one stored scope produces independent positive and negated mood owners" {
+    var positive: FilesShould = undefined;
+    var negated: FilesShouldNot = undefined;
+    {
+        var entry = try projectFiles(std.testing.allocator, .{ .locator = "fixture" });
+        defer entry.deinit();
+        var base = try entry.inFolder(&.{.{ .glob = "src/domain" }});
+        defer base.deinit();
+        positive = try base.should();
+        negated = try base.shouldNot();
+        try std.testing.expectEqual(@as(usize, 1), base.selectorCount());
+    }
+    defer positive.deinit();
+    defer negated.deinit();
+
+    try std.testing.expectEqual(Mood.should, positive.mood());
+    try std.testing.expectEqual(Mood.should_not, negated.mood());
+    var positive_evidence = try positive.scopePatterns(std.testing.allocator);
+    defer positive_evidence.deinit(std.testing.allocator);
+    var negated_evidence = try negated.scopePatterns(std.testing.allocator);
+    defer negated_evidence.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("src/domain", positive_evidence.items()[0].expression);
+    try std.testing.expect(positive_evidence.items()[0].eql(negated_evidence.items()[0]));
+}
+
+test "both moods select the same files and invert one shared predicate" {
+    var graph: Graph = .{};
+    defer graph.deinit(std.testing.allocator);
+    for ([_][]const u8{
+        "src/domain/order.zig",
+        "src/domain/order_test.zig",
+        "src/api/handler.zig",
+    }) |path| {
+        try graph.add(
+            std.testing.allocator,
+            path,
+            path,
+            false,
+            extraction.ImportKinds.initEmpty(),
+        );
+    }
+    graph.sort();
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var scope = try entry.inFolder(&.{.{ .glob = "src/domain" }});
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var negated = try scope.shouldNot();
+    defer negated.deinit();
+    var positive_files = try positive.select(&graph);
+    defer positive_files.deinit();
+    var negated_files = try negated.select(&graph);
+    defer negated_files.deinit();
+
+    try std.testing.expectEqual(positive_files.len(), negated_files.len());
+    var positive_violations: usize = 0;
+    var negated_violations: usize = 0;
+    for (positive_files.items(), negated_files.items()) |positive_path, negated_path| {
+        try std.testing.expectEqualStrings(positive_path, negated_path);
+        const is_test_file = std.mem.endsWith(u8, positive_path, "_test.zig");
+        if (!positive.predicateHolds(is_test_file)) {
+            positive_violations += 1;
+            try std.testing.expectEqualStrings("src/domain/order.zig", positive_path);
+        }
+        if (!negated.predicateHolds(is_test_file)) {
+            negated_violations += 1;
+            try std.testing.expectEqualStrings("src/domain/order_test.zig", negated_path);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), positive_violations);
+    try std.testing.expectEqual(@as(usize, 1), negated_violations);
+}
+
+test "mood stages prevent repeated or out-of-order fluent grammar and offer no synonyms" {
+    inline for ([_][]const u8{
+        "must", "mustNot", "never", "always", "shall", "shallNot", "may", "mayNot",
+    }) |synonym| {
+        try std.testing.expect(!@hasDecl(FilesScope, synonym));
+        try std.testing.expect(!@hasDecl(FilesShould, synonym));
+        try std.testing.expect(!@hasDecl(FilesShouldNot, synonym));
+    }
+    inline for ([_][]const u8{ "should", "shouldNot", "withName", "inFolder", "inPath", "inFile" }) |invalid| {
+        try std.testing.expect(!@hasDecl(FilesShould, invalid));
+        try std.testing.expect(!@hasDecl(FilesShouldNot, invalid));
+    }
+}
+
+test "positive and negated descriptions share one stable sentence renderer" {
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var folders = try entry.inFolder(&.{
+        .{ .glob = "src/api" },
+        .{ .glob = "src/domain" },
+    });
+    defer folders.deinit();
+    var scope = try folders.withName(&.{.{ .glob = "order*.zig" }});
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var negated = try scope.shouldNot();
+    defer negated.deinit();
+    const positive_description = try positive.description(std.testing.allocator);
+    defer std.testing.allocator.free(positive_description);
+    const negated_description = try negated.description(std.testing.allocator);
+    defer std.testing.allocator.free(negated_description);
+
+    try std.testing.expectEqualStrings(
+        "project files, in folder (\"src/api\" or \"src/domain\"), with name \"order*.zig\", should",
+        positive_description,
+    );
+    try std.testing.expectEqualStrings(
+        "project files, in folder (\"src/api\" or \"src/domain\"), with name \"order*.zig\", should not",
+        negated_description,
+    );
 }
 
 fn fixtureRoot(allocator: Allocator) ![:0]u8 {
@@ -566,10 +837,16 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer base.deinit();
     var branch = try base.withName(&.{.{ .glob = "order*.zig" }});
     defer branch.deinit();
-    var selected = try branch.select(&graph);
+    var positive = try branch.should();
+    defer positive.deinit();
+    var negated = try branch.shouldNot();
+    defer negated.deinit();
+    var selected = try positive.select(&graph);
     defer selected.deinit();
-    var evidence = try branch.scopePatterns(allocator);
+    var evidence = try negated.scopePatterns(allocator);
     defer evidence.deinit(allocator);
+    const description = try positive.description(allocator);
+    defer allocator.free(description);
     try std.testing.expectEqual(@as(usize, 2), selected.len());
 }
 
