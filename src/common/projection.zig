@@ -17,6 +17,8 @@ pub const perExternalEdge = @import("projection/edge_projections.zig").perExtern
 pub const perInternalEdge = @import("projection/edge_projections.zig").perInternalEdge;
 
 test {
+    _ = @import("projection/cycles/adjacency.zig");
+    _ = @import("projection/cycles/tarjan.zig");
     _ = @import("projection/edge_projections.zig");
     _ = @import("projection/mapped_edge.zig");
     _ = @import("projection/project_edges.zig");
