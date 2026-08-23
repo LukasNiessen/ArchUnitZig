@@ -8,6 +8,7 @@ pub const LayerDependencyViolation = @import("assertion/layer_dependency_violati
 pub const LayerPolicyKind = @import("assertion/layer_dependency_violation.zig").LayerPolicyKind;
 pub const Mood = @import("assertion/mood.zig").Mood;
 pub const SliceDependencyViolation = @import("assertion/slice_dependency_violation.zig").SliceDependencyViolation;
+pub const SliceRuleKind = @import("assertion/slice_dependency_violation.zig").SliceRuleKind;
 pub const MatchingViolation = @import("assertion/matching_violation.zig").MatchingViolation;
 pub const ScopePattern = @import("assertion/scope_pattern.zig").ScopePattern;
 pub const Violation = @import("assertion/violation.zig").Violation;

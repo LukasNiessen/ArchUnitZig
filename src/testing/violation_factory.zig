@@ -255,21 +255,36 @@ fn formatSliceDependency(
     writePath(&output.writer, value.source_slice) catch return error.OutOfMemory;
     output.writer.writeAll(" -> ") catch return error.OutOfMemory;
     writePath(&output.writer, value.target_slice) catch return error.OutOfMemory;
-    if (value.mood.isNegated()) {
-        output.writer.print(
-            "\nReason: slice \"{s}\" may not depend on slice \"{s}\"\nImports:",
-            .{ value.source_slice, value.target_slice },
-        ) catch return error.OutOfMemory;
-        const dependency = value.dependency.?;
-        try writeProjectedEdge(
-            allocator,
-            &output.writer,
-            dependency,
-            dependency.evidence()[0].external,
-        );
-    } else {
-        output.writer.writeAll("\nReason: required slice dependency is absent") catch
-            return error.OutOfMemory;
+    switch (value.rule) {
+        .contain_dependency => if (value.mood.isNegated()) {
+            output.writer.print(
+                "\nReason: slice \"{s}\" may not depend on slice \"{s}\"\nImports:",
+                .{ value.source_slice, value.target_slice },
+            ) catch return error.OutOfMemory;
+            const dependency = value.dependency.?;
+            try writeProjectedEdge(
+                allocator,
+                &output.writer,
+                dependency,
+                dependency.evidence()[0].external,
+            );
+        } else {
+            output.writer.writeAll("\nReason: required slice dependency is absent") catch
+                return error.OutOfMemory;
+        },
+        .adhere_to_diagram => if (value.dependency) |dependency| {
+            output.writer.writeAll("\nReason: actual slice dependency is absent from the PlantUML diagram\nImports:") catch
+                return error.OutOfMemory;
+            try writeProjectedEdge(
+                allocator,
+                &output.writer,
+                dependency,
+                dependency.evidence()[0].external,
+            );
+        } else {
+            output.writer.writeAll("\nReason: PlantUML diagram dependency is absent from the project graph") catch
+                return error.OutOfMemory;
+        },
     }
     return finish(
         allocator,
@@ -928,6 +943,46 @@ test "slice dependency formatter distinguishes forbidden evidence from a require
             "Reason: required slice dependency is absent",
         required_formatted.details,
     );
+
+    var unexpected_payload = try assertion.SliceDependencyViolation.initDiagramClone(
+        std.testing.allocator,
+        "api",
+        "retrieval",
+        edge,
+    );
+    var unexpected = assertion.Violation.fromSliceDependencyMove(&unexpected_payload);
+    defer unexpected.deinit(std.testing.allocator);
+    var unexpected_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        unexpected,
+        "project slices should adhere to the PlantUML diagram",
+    );
+    defer unexpected_formatted.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        unexpected_formatted.details,
+        "Reason: actual slice dependency is absent from the PlantUML diagram\nImports:",
+    ) != null);
+
+    var missing_payload = try assertion.SliceDependencyViolation.initDiagramClone(
+        std.testing.allocator,
+        "services",
+        "models",
+        null,
+    );
+    var missing = assertion.Violation.fromSliceDependencyMove(&missing_payload);
+    defer missing.deinit(std.testing.allocator);
+    var missing_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        missing,
+        "project slices should adhere to the PlantUML diagram",
+    );
+    defer missing_formatted.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        missing_formatted.details,
+        "Reason: PlantUML diagram dependency is absent from the project graph",
+    ) != null);
 }
 
 test "cycle formatter preserves traversal and renders each concrete import" {

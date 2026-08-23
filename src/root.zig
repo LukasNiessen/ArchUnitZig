@@ -30,6 +30,7 @@ pub const ExternalModuleDependencyViolation = assertion.ExternalModuleDependency
 pub const LayerDependencyViolation = assertion.LayerDependencyViolation;
 pub const LayerPolicyKind = assertion.LayerPolicyKind;
 pub const SliceDependencyViolation = assertion.SliceDependencyViolation;
+pub const SliceRuleKind = assertion.SliceRuleKind;
 pub const DependencyPolicyKind = layer_rules.DependencyPolicyKind;
 pub const LayerDefinition = layer_rules.LayerDefinition;
 pub const LayerError = layer_rules.LayerError;
@@ -129,6 +130,7 @@ pub const PlantUmlDiagnosticKind = slice_rules.PlantUmlDiagnosticKind;
 pub const PlantUmlParseResult = slice_rules.PlantUmlParseResult;
 pub const PlantUmlRenderError = slice_rules.PlantUmlRenderError;
 pub const PlantUmlExportError = slice_rules.PlantUmlExportError;
+pub const DiagramAdherenceOptions = slice_rules.DiagramAdherenceOptions;
 pub const TechnicalCode = common_error.TechnicalCode;
 pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
@@ -213,6 +215,7 @@ pub const slices = slice_rules.slices;
 pub const parsePlantUml = slice_rules.parsePlantUml;
 pub const renderPlantUml = slice_rules.renderPlantUml;
 pub const exportPlantUml = slice_rules.exportPlantUml;
+pub const gatherDiagramAdherenceViolations = slice_rules.gatherDiagramAdherenceViolations;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
