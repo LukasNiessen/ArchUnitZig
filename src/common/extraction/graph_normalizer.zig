@@ -36,12 +36,14 @@ pub fn normalizeGraph(
             );
         }
         for (source.references) |reference| {
-            try graph.addLocated(
+            try graph.addClassifiedLocated(
                 allocator,
                 source.source_path,
                 reference.target,
                 reference.external,
                 ImportKinds.initOne(reference.kind),
+                reference.class,
+                reference.availability,
                 &.{reference.location},
             );
         }

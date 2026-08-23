@@ -43,6 +43,34 @@ pub const Graph = struct {
         locations: []const edge_module.SourceLocation,
     ) AddError!void {
         var candidate = try Edge.initWithLocations(allocator, source, target, external, import_kinds, locations);
+        return self.addCandidate(allocator, &candidate);
+    }
+
+    pub fn addClassifiedLocated(
+        self: *Graph,
+        allocator: Allocator,
+        source: []const u8,
+        target: []const u8,
+        external: bool,
+        import_kinds: ImportKinds,
+        target_class: edge_module.TargetClass,
+        target_availability: edge_module.TargetAvailability,
+        locations: []const edge_module.SourceLocation,
+    ) AddError!void {
+        var candidate = try Edge.initClassifiedWithLocations(
+            allocator,
+            source,
+            target,
+            external,
+            import_kinds,
+            target_class,
+            target_availability,
+            locations,
+        );
+        return self.addCandidate(allocator, &candidate);
+    }
+
+    fn addCandidate(self: *Graph, allocator: Allocator, candidate: *Edge) AddError!void {
         errdefer candidate.deinit(allocator);
 
         for (self.edges.items) |*existing| {
@@ -55,11 +83,14 @@ pub const Graph = struct {
 
             try existing.mergeLocations(allocator, candidate.locationItems());
             existing.import_kinds.setUnion(candidate.import_kinds);
+            existing.target_classes.setUnion(candidate.target_classes);
+            existing.target_availabilities.setUnion(candidate.target_availabilities);
             candidate.deinit(allocator);
             return;
         }
 
-        try self.edges.append(allocator, candidate);
+        try self.edges.append(allocator, candidate.*);
+        candidate.* = undefined;
     }
 
     pub fn sort(self: *Graph) void {
@@ -151,6 +182,36 @@ test "a graph rejects contradictory classification for one pair" {
         ),
     );
     try std.testing.expectEqual(@as(usize, 1), graph.len());
+}
+
+test "parallel classified edges union target class and availability evidence" {
+    var graph: Graph = .{};
+    defer graph.deinit(std.testing.allocator);
+    try graph.addClassifiedLocated(
+        std.testing.allocator,
+        "src/main.zig",
+        "database",
+        true,
+        ImportKinds.initOne(.named_module),
+        .external,
+        .resolved,
+        &.{},
+    );
+    try graph.addClassifiedLocated(
+        std.testing.allocator,
+        "src/main.zig",
+        "database",
+        true,
+        ImportKinds.initOne(.named_module),
+        .external,
+        .unresolved,
+        &.{},
+    );
+
+    const edge = graph.find("src/main.zig", "database").?;
+    try std.testing.expect(edge.target_classes.contains(.external));
+    try std.testing.expect(edge.target_availabilities.contains(.resolved));
+    try std.testing.expect(edge.target_availabilities.contains(.unresolved));
 }
 
 test "cloning a graph owns independent edges" {

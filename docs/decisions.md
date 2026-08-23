@@ -460,3 +460,36 @@ locations, while storing only the shared mood fact and no rendered prose.
 Consequence: direct allowlists and blocklists share one `Mood.holds` decision, ZON/resources remain
 selectable objects, multiple bad imports from one source render coherently, and rule results survive
 destruction of the graph, selectors, terminal, and cache.
+
+### D028 — External-module policy is category-explicit and metadata-backed
+
+The normalized `Edge` model retains `TargetClass` and `TargetAvailability` sets in addition to its
+external bit and import-kind set. Extraction inserts the exact classified values; parallel edges
+union them. Compatibility constructors infer deterministic defaults for hand-built graphs. Clone,
+equality, projection, caching, and violation ownership all preserve the sets. This is necessary
+because target spelling cannot distinguish a resolved package alias from an unresolved alias, and
+the external bit cannot distinguish either from `std`, a header, or a missing resource.
+
+`dependOnExternalModules()` enables three categories by default: resolved package modules,
+unresolved named aliases, and missing/outside named mappings. These together match the sibling
+meaning of an external module while retaining their availability differences in evidence. Compiler
+modules (`std`, `builtin`, and an unresolved `root`), C headers, and external/missing embedded
+resources are excluded by default. The fluent builder and terminal expose explicit
+`includingCompilerModules`, `includingCHeaders`, and `includingResources` opt-ins. A `root` mapped by
+its compilation unit and any named module mapped to a project root are internal and never enter the
+external projection.
+
+The first `matching` call completes the terminal. Repeated calls and multiple patterns in one call
+join one OR group, unlike the AND chaining of file object selectors. Within enabled categories,
+positive mood is an allowlist and negative mood a blocklist. The terminal guards both an empty
+subject selection and an external object expression that matches no enabled target; this is
+especially important under negation, where a typo would otherwise pass vacuously.
+
+The pure gatherer groups disagreeing external projected edges by source. Each
+`external_module_dependency` violation owns those edges, including target class/availability sets,
+import kinds, and locations, and stores no rendered prose. Category membership is derived from raw
+edge evidence, never from names such as `std` or file extensions.
+
+Consequence: policies can be broad by default without conflating fundamentally different Zig
+dependency mechanisms, explicit opt-ins remain reviewable in fluent rules, and reporters can explain
+whether a violation was a package, unresolved alias, compiler module, header, or resource.
