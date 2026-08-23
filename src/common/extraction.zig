@@ -53,6 +53,7 @@ test {
     _ = @import("extraction/graph_cache.zig");
     _ = @import("extraction/graph_normalizer.zig");
     _ = @import("extraction/identifier.zig");
+    _ = @import("extraction/ignore_directive.zig");
     _ = @import("extraction/import_kind.zig");
     _ = @import("extraction/module_resolver.zig");
     _ = @import("extraction/project_locator.zig");

@@ -5,6 +5,7 @@ pub const UserError = error{
     InvalidFluentStage,
     InvalidProjectPath,
     InvalidModuleOverride,
+    InvalidIgnoreDirective,
 };
 
 pub const TechnicalError = error{
@@ -27,6 +28,7 @@ pub const UserCode = enum {
     invalid_fluent_stage,
     invalid_project_path,
     invalid_module_override,
+    invalid_ignore_directive,
 
     pub fn toError(self: UserCode) UserError {
         return switch (self) {
@@ -36,6 +38,7 @@ pub const UserCode = enum {
             .invalid_fluent_stage => error.InvalidFluentStage,
             .invalid_project_path => error.InvalidProjectPath,
             .invalid_module_override => error.InvalidModuleOverride,
+            .invalid_ignore_directive => error.InvalidIgnoreDirective,
         };
     }
 };
@@ -68,6 +71,7 @@ pub fn categoryOf(failure: anyerror) ?ErrorCategory {
         error.InvalidFluentStage,
         error.InvalidProjectPath,
         error.InvalidModuleOverride,
+        error.InvalidIgnoreDirective,
         => .user,
         error.FileSystemFailure,
         error.OutOfMemory,

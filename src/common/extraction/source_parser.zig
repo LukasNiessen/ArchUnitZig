@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const common_error = @import("../error.zig");
+const ignore_directive = @import("ignore_directive.zig");
 const import_kind = @import("import_kind.zig");
 const source_location = @import("source_location.zig");
 
@@ -78,6 +79,15 @@ pub fn parseSource(
         return result;
     }
 
+    var ignore_directives = try ignore_directive.parseIgnoreDirectives(
+        allocator,
+        source_path,
+        source,
+        &tree,
+        error_context,
+    );
+    defer ignore_directives.deinit(allocator);
+
     const tags = tree.tokens.items(.tag);
     var index: usize = 0;
     while (index < tree.tokens.len) : (index += 1) {
@@ -132,10 +142,16 @@ pub fn parseSource(
             .embedded_file => .embedded_file,
             .c_header => .c_header,
         };
+        const start_location = tokenLocation(&tree, @intCast(index));
+        const end_location = tokenLocation(&tree, @intCast(index + 3));
+        if (ignore_directives.ignores(decoded, start_location.line, end_location.line)) {
+            allocator.free(decoded);
+            continue;
+        }
         result.references.append(allocator, .{
             .target = decoded,
             .kind = reference_kind,
-            .location = tokenLocation(&tree, @intCast(index)),
+            .location = start_location,
         }) catch {
             allocator.free(decoded);
             return error_context.failTechnical(.out_of_memory, "zig.parse_source", source_path, error.OutOfMemory);
@@ -346,9 +362,78 @@ test "reference locations are one-based and retain byte offsets" {
     try std.testing.expectEqual(SourceLocation{ .byte_offset = 55, .line = 2, .column = 20 }, result.references.items[1].location);
 }
 
+test "inline and immediately preceding directives suppress only their dependency lines" {
+    const source: [:0]const u8 =
+        \\const first = @import("first.zig"); // archunit: ignore
+        \\// archunit: ignore
+        \\const asset = @embedFile("asset.txt");
+        \\// archunit: ignore
+        \\
+        \\const kept = @import("kept.zig");
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/ignored.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), result.references.items.len);
+    try std.testing.expectEqualStrings("kept.zig", result.references.items[0].target);
+}
+
+test "scoped directives match decoded targets exactly across multiple dependencies" {
+    const source: [:0]const u8 =
+        \\const first = @import("first.zig"); const second = @import("second.zig"); // archunit: ignore first.zig
+        \\const escaped = @import("feature\x2ezig"); // archunit: ignore feature.zig
+        \\const prefix = @import("vendor/api.zig"); // archunit: ignore vendor
+        \\const c = @cImport({ @cInclude("ignored.h"); @cInclude("kept.h"); }); // archunit: ignore ignored.h
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/scoped.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), result.references.items.len);
+    try std.testing.expectEqualStrings("second.zig", result.references.items[0].target);
+    try std.testing.expectEqualStrings("vendor/api.zig", result.references.items[1].target);
+    try std.testing.expectEqualStrings("kept.h", result.references.items[2].target);
+}
+
+test "directives handle CRLF and suppress one occurrence without hiding another" {
+    const source: [:0]const u8 =
+        "// archunit: ignore duplicate.zig\r\n" ++
+        "const ignored = @import(\"duplicate.zig\");\r\n" ++
+        "const kept = @import(\"duplicate.zig\");\r\n";
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/crlf.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), result.references.items.len);
+    try std.testing.expectEqualStrings("duplicate.zig", result.references.items[0].target);
+    try std.testing.expectEqual(@as(usize, 3), result.references.items[0].location.line);
+}
+
+test "directive lookalikes in unrelated comments and strings do not suppress references" {
+    const source: [:0]const u8 =
+        \\const text = "// archunit: ignore";
+        \\/// archunit: ignore
+        \\const documented = @import("documented.zig");
+        \\// architecture uses archunit: ignore in prose
+        \\const kept = @import("kept.zig");
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/lookalikes.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), result.references.items.len);
+    try std.testing.expectEqualStrings("documented.zig", result.references.items[0].target);
+    try std.testing.expectEqualStrings("kept.zig", result.references.items[1].target);
+}
+
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     const source: [:0]const u8 =
-        \\const std = @import("std");
+        \\const std = @import("std"); // archunit: ignore other
         \\const feature = @import("feature.zig");
         \\const asset = @embedFile("asset.txt");
     ;
