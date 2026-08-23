@@ -5,6 +5,7 @@ const cycle_violation = @import("cycle_violation.zig");
 const custom_file_violation = @import("custom_file_violation.zig");
 const file_dependency_violation = @import("file_dependency_violation.zig");
 const external_dependency_violation = @import("external_module_dependency_violation.zig");
+const layer_dependency_violation = @import("layer_dependency_violation.zig");
 const matching_violation = @import("matching_violation.zig");
 
 const Allocator = std.mem.Allocator;
@@ -13,6 +14,7 @@ pub const CycleViolation = cycle_violation.CycleViolation;
 pub const CustomFileViolation = custom_file_violation.CustomFileViolation;
 pub const FileDependencyViolation = file_dependency_violation.FileDependencyViolation;
 pub const ExternalModuleDependencyViolation = external_dependency_violation.ExternalModuleDependencyViolation;
+pub const LayerDependencyViolation = layer_dependency_violation.LayerDependencyViolation;
 pub const MatchingViolation = matching_violation.MatchingViolation;
 
 /// Closed, data-only architecture disagreement. Formatters exhaustively switch on this union in
@@ -23,10 +25,11 @@ pub const Violation = union(enum) {
     empty_test: EmptyTestViolation,
     external_module_dependency: ExternalModuleDependencyViolation,
     file_dependency: FileDependencyViolation,
+    layer_dependency: LayerDependencyViolation,
     matching: MatchingViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || custom_file_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || custom_file_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
@@ -64,6 +67,12 @@ pub const Violation = union(enum) {
         return result;
     }
 
+    pub fn fromLayerDependencyMove(payload: *LayerDependencyViolation) Violation {
+        const result = Violation{ .layer_dependency = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
     pub fn kind(self: Violation) Kind {
         return std.meta.activeTag(self);
     }
@@ -75,6 +84,7 @@ pub const Violation = union(enum) {
             .empty_test => |value| .{ .empty_test = try value.clone(allocator) },
             .external_module_dependency => |value| .{ .external_module_dependency = try value.clone(allocator) },
             .file_dependency => |value| .{ .file_dependency = try value.clone(allocator) },
+            .layer_dependency => |value| .{ .layer_dependency = try value.clone(allocator) },
             .matching => |value| .{ .matching = try value.clone(allocator) },
         };
     }
@@ -86,6 +96,7 @@ pub const Violation = union(enum) {
             .empty_test => |*value| value.deinit(allocator),
             .external_module_dependency => |*value| value.deinit(allocator),
             .file_dependency => |*value| value.deinit(allocator),
+            .layer_dependency => |*value| value.deinit(allocator),
             .matching => |*value| value.deinit(allocator),
         }
         self.* = undefined;
@@ -99,6 +110,7 @@ pub const Violation = union(enum) {
             .empty_test => |left| left.eql(other.empty_test),
             .external_module_dependency => |left| left.eql(other.external_module_dependency),
             .file_dependency => |left| left.eql(other.file_dependency),
+            .layer_dependency => |left| left.eql(other.layer_dependency),
             .matching => |left| left.eql(other.matching),
         };
     }
@@ -111,6 +123,7 @@ fn formatterDispatchBoundary(violation: Violation) []const u8 {
         .empty_test => "format-empty-selection-in-testing-layer",
         .external_module_dependency => "format-external-module-dependency-in-testing-layer",
         .file_dependency => "format-file-dependency-in-testing-layer",
+        .layer_dependency => "format-layer-dependency-in-testing-layer",
         .matching => "format-matching-disagreement-in-testing-layer",
     };
 }

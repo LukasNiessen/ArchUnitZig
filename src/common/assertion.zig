@@ -4,6 +4,8 @@ pub const EmptyTestViolation = @import("assertion/empty_test_violation.zig").Emp
 pub const guardEmptyTest = @import("assertion/empty_test_guard.zig").guardEmptyTest;
 pub const FileDependencyViolation = @import("assertion/file_dependency_violation.zig").FileDependencyViolation;
 pub const ExternalModuleDependencyViolation = @import("assertion/external_module_dependency_violation.zig").ExternalModuleDependencyViolation;
+pub const LayerDependencyViolation = @import("assertion/layer_dependency_violation.zig").LayerDependencyViolation;
+pub const LayerPolicyKind = @import("assertion/layer_dependency_violation.zig").LayerPolicyKind;
 pub const Mood = @import("assertion/mood.zig").Mood;
 pub const MatchingViolation = @import("assertion/matching_violation.zig").MatchingViolation;
 pub const ScopePattern = @import("assertion/scope_pattern.zig").ScopePattern;
@@ -17,6 +19,7 @@ test {
     _ = @import("assertion/empty_test_guard.zig");
     _ = @import("assertion/file_dependency_violation.zig");
     _ = @import("assertion/external_module_dependency_violation.zig");
+    _ = @import("assertion/layer_dependency_violation.zig");
     _ = @import("assertion/mood.zig");
     _ = @import("assertion/matching_violation.zig");
     _ = @import("assertion/scope_pattern.zig");
