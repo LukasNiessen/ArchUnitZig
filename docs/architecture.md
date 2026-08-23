@@ -257,6 +257,15 @@ duplicate the source buffer. Unlike graph-dependent rules, this terminal enumera
 files directly so malformed or binary `.zig` bytes can still be governed. Valid Zig syntax supplies
 AST facts; malformed bytes and ZON files expose `null` declaration facts rather than invented data.
 
+Every terminal applies one shared empty-test guard to its subject selection. Zero subjects produce
+one `empty_test` violation by default, including under negation; `allow_empty_tests` returns an empty
+result instead. Direct file-dependency rules also guard a zero-match object scope in both moods,
+because their possible objects are the finite internal project files and a misspelling is
+detectable. External module names form an open universe: a positive rule with no enabled external
+candidates guards its object expression, while a negative rule with no forbidden match passes by
+definition. A positive expression missing existing external candidates reports ordinary dependency
+violations instead of hiding them behind an empty-test result.
+
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
 `std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging
 configuration, and the centralized extraction options. Their slices are borrowed only for the call;
