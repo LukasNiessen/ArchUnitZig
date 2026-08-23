@@ -247,8 +247,8 @@ Graph cache identity is a versioned, length-delimited byte encoding of the canon
 and every field in `ExtractionOptions`: exclusions, strictness, resource and C-header toggles,
 compilation-unit/root/module mappings, and build-graph mode. Wyhash accelerates lookup, but equality
 always compares the complete encoding. A reflection test requires each current and future extraction
-field to be listed by the key schema. `CheckOptions.clear_cache` controls an operation and therefore
-does not alter graph identity.
+or nested module-mapping field to be listed by the key schema. `CheckOptions.clear_cache` controls an
+operation and therefore does not alter graph identity.
 
 An instance `GraphCache` uses its explicit allocator and is not synchronized. It clones both keys and
 graphs on insertion and clones graphs again on lookup; callers may deinitialise source inputs or clear

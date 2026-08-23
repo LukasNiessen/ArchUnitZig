@@ -4,6 +4,7 @@ const common_error = @import("../error.zig");
 const common_path = @import("../path.zig");
 const extraction_options = @import("extraction_options.zig");
 const graph_module = @import("graph.zig");
+const module_resolver = @import("module_resolver.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -20,6 +21,9 @@ const keyed_option_fields = [_][]const u8{
     "module_resolution",
     "build_graph_mode",
 };
+const keyed_module_resolution_fields = [_][]const u8{"compilation_units"};
+const keyed_compilation_unit_fields = [_][]const u8{ "id", "root_source_path", "modules" };
+const keyed_module_override_fields = [_][]const u8{ "name", "source_path", "origin" };
 
 /// Owned canonical cache identity. Hashes accelerate lookup; equality always compares full bytes.
 pub const GraphCacheKey = struct {
@@ -274,7 +278,6 @@ test "canonical roots produce equal keys and every option separates keys" {
     defer other_project.deinit(std.testing.allocator);
     try std.testing.expect(!baseline.eql(other_project));
 
-    const module_resolver = @import("module_resolver.zig");
     const exclusions = [_][]const u8{"generated/**"};
     const modules = [_]module_resolver.ModuleOverride{.{ .name = "domain", .source_path = "src/domain/root.zig" }};
     const units = [_]module_resolver.CompilationUnitOverride{.{
@@ -305,7 +308,6 @@ test "every compilation-unit and module mapping field separates cache keys" {
     var context = common_error.ErrorContext.init(std.testing.allocator);
     defer context.deinit();
 
-    const module_resolver = @import("module_resolver.zig");
     const Mapping = struct {
         unit_id: []const u8 = "app",
         root_source_path: ?[]const u8 = "src/main.zig",
@@ -442,17 +444,24 @@ test "global cache clears safely without invalidating caller clones" {
     try std.testing.expectEqual(@as(?Graph, null), try cloneGraphFromCache(std.testing.allocator, key));
 }
 
-test "cache key schema lists every extraction option" {
-    const fields = @typeInfo(ExtractionOptions).@"struct".fields;
-    try std.testing.expectEqual(fields.len, keyed_option_fields.len);
+fn expectKeySchemaCovers(comptime T: type, keyed_fields: []const []const u8) !void {
+    const fields = @typeInfo(T).@"struct".fields;
+    try std.testing.expectEqual(fields.len, keyed_fields.len);
     inline for (fields) |field| {
         var found = false;
-        for (keyed_option_fields) |keyed| if (std.mem.eql(u8, field.name, keyed)) {
+        for (keyed_fields) |keyed| if (std.mem.eql(u8, field.name, keyed)) {
             found = true;
             break;
         };
         try std.testing.expect(found);
     }
+}
+
+test "cache key schema lists every extraction and module-mapping option" {
+    try expectKeySchemaCovers(ExtractionOptions, &keyed_option_fields);
+    try expectKeySchemaCovers(module_resolver.ModuleResolutionOverrides, &keyed_module_resolution_fields);
+    try expectKeySchemaCovers(module_resolver.CompilationUnitOverride, &keyed_compilation_unit_fields);
+    try expectKeySchemaCovers(module_resolver.ModuleOverride, &keyed_module_override_fields);
 }
 
 fn exerciseAllocationFailures(allocator: Allocator, root: []const u8) !void {

@@ -145,9 +145,9 @@ to the documented cache, VCS, output, documentation, and dependency defaults.
 Extraction settings live in one `ExtractionOptions` value: exclusions, parser strictness,
 resource/C-header toggles, explicit compilation-unit mappings, and build-graph mode. Graph-cache
 keys use the canonical project root plus a length-delimited encoding of every field. A schema test
-reflects over the options so adding a field without acknowledging it in key construction fails the
-suite. Slice order is significant; this may conservatively miss an equivalent hit but cannot return
-a graph produced for different input.
+reflects over the options and nested module-mapping structs, so adding a field without acknowledging
+it in key construction fails the suite. Slice order is significant; this may conservatively miss an
+equivalent hit but cannot return a graph produced for different input.
 
 `GraphCache` instances own cloned keys and graphs and are deliberately not synchronized. Reads also
 return clones, so clearing or destroying a cache never invalidates a caller's graph. The process-wide
