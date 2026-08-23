@@ -3,6 +3,7 @@ pub const Candidate = @import("matching/filter.zig").Candidate;
 pub const Filter = @import("matching/filter.zig").Filter;
 pub const MatchRange = @import("matching/regex.zig").MatchRange;
 pub const Pattern = @import("matching/pattern.zig").Pattern;
+pub const PatternSyntax = @import("matching/pattern.zig").PatternSyntax;
 pub const Regex = @import("matching/regex.zig").Regex;
 pub const MatchingMode = @import("matching/pattern_target.zig").MatchingMode;
 pub const PatternTarget = @import("matching/pattern_target.zig").PatternTarget;

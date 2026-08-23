@@ -7,6 +7,7 @@ const Regex = regex_module.Regex;
 
 pub const GlobError = error{CharacterClassContainsSeparator};
 pub const CompileError = Regex.CompileError || GlobError;
+pub const PatternSyntax = enum { glob, regex };
 
 /// A borrowed user-facing pattern. Compiling it produces an owned `Regex`.
 ///
@@ -16,13 +17,36 @@ pub const Pattern = union(enum) {
     glob: []const u8,
     regex: []const u8,
 
+    pub fn syntax(self: Pattern) PatternSyntax {
+        return switch (self) {
+            .glob => .glob,
+            .regex => .regex,
+        };
+    }
+
+    pub fn source(self: Pattern) []const u8 {
+        return switch (self) {
+            inline else => |expression| expression,
+        };
+    }
+
     pub fn compile(self: Pattern, allocator: Allocator) CompileError!Regex {
         return switch (self) {
-            .glob => |source| compileGlob(allocator, source),
-            .regex => |source| Regex.compile(allocator, source),
+            .glob => |expression| compileGlob(allocator, expression),
+            .regex => |expression| Regex.compile(allocator, expression),
         };
     }
 };
+
+test "pattern exposes structured syntax and source facts" {
+    const glob = Pattern{ .glob = "src/**/*.zig" };
+    const regular_expression = Pattern{ .regex = "src/.+\\.zig" };
+
+    try std.testing.expectEqual(PatternSyntax.glob, glob.syntax());
+    try std.testing.expectEqualStrings("src/**/*.zig", glob.source());
+    try std.testing.expectEqual(PatternSyntax.regex, regular_expression.syntax());
+    try std.testing.expectEqualStrings("src/.+\\.zig", regular_expression.source());
+}
 
 fn compileGlob(allocator: Allocator, glob: []const u8) CompileError!Regex {
     var expression: std.ArrayList(u8) = .empty;
