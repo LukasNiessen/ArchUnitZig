@@ -239,8 +239,10 @@ identity and owned query state lazy until `snapshot(CheckOptions)` extracts the 
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and
 their selected edges; equal mapped pairs aggregate counts plus import-kind, target-class, and
 availability sets. The final snapshot owns a title, sorted stable-id nodes, sorted label-based edges,
-and summary counts. DOT, Mermaid, D2, CSV, JSON, and HTML rendering must consume that value without
-performing extraction or querying again.
+and summary counts. `GraphRenderer` turns only that value into owned DOT, Mermaid, D2, CSV, JSON, or
+offline HTML bytes. Format escaping and metadata-backed external/resource styling stay inside the
+rendering module. Export creates parent directories deliberately and writes through caller-supplied
+`std.Io`; fluent render/export terminals may perform extraction once but a renderer never does.
 
 The `empty_test` tag records a stable machine `rule_id`, negation, and scope-pattern
 facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
