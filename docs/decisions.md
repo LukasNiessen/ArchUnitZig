@@ -304,6 +304,21 @@ Consequence: file, layer, and slice views can share one projection kernel withou
 pointers or language-specific relabelling state. Deterministic owned results cost additional edge
 clones, a deliberate trade-off for safe rule results and diagnostics.
 
+### D022 — Standard edge factories preserve shared externality
+
+`perEdge`, `perInternalEdge`, and `perExternalEdge` are allocation-free, stateless `MapFunction`
+factories. All three drop raw self-edges because downstream dependency projections must not turn the
+synthetic node-retention mechanism into a dependency. `identity` is the named deliberate exception
+and retains every raw edge.
+
+The filtered factories inspect only `Edge.external`; they never infer externality from `ImportKind`
+or target spelling. A resolved `root` alias and project-owned `@embedFile` resource can therefore be
+internal. An unresolved `root`, missing resource, `std`, `builtin`, package alias, or C header can be
+external. Both states keep their Zig-specific import kind in the cumulated raw evidence.
+
+Consequence: files, layers, slices, and reports share identical internal/external semantics across
+languages, while Zig-specific selectors can still inspect kinds without changing graph topology.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
