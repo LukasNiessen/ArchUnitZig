@@ -36,7 +36,7 @@ pub const GraphReportNode = struct {
     }
 };
 
-/// One owned, possibly aggregated edge between report-node IDs.
+/// One owned, possibly aggregated edge between report-node labels.
 pub const GraphReportEdge = struct {
     source: []const u8,
     target: []const u8,
