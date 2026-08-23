@@ -131,6 +131,11 @@ pub const ResultFactory = testing_support.ResultFactory;
 pub const ResultOptions = testing_support.ResultOptions;
 pub const TestResult = testing_support.TestResult;
 pub const ViolationGroup = testing_support.ViolationGroup;
+pub const ArchitectureAssertionError = testing_support.ArchitectureAssertionError;
+pub const AssertionOptions = testing_support.AssertionOptions;
+pub const assertAllPass = testing_support.assertAllPass;
+pub const assertPasses = testing_support.assertPasses;
+pub const expectPasses = testing_support.expectPasses;
 pub const gatherMatchingFileViolations = file_rules.gatherMatchingFileViolations;
 pub const gatherFileDependencyViolations = file_rules.gatherFileDependencyViolations;
 pub const gatherCustomFileViolations = file_rules.gatherCustomFileViolations;
@@ -156,6 +161,27 @@ test "public facade builds and runs pattern filters" {
         std.testing.allocator,
         .{ .path = "src\\domain\\model.zig" },
     ));
+}
+
+test "public native assertion helper runs a concrete rule in an ordinary test block" {
+    var entry = try projectFiles(std.testing.allocator, .{
+        .locator = "test/fixtures/files-selection",
+    });
+    defer entry.deinit();
+    var root_scope = try entry.inFile(&.{"root.zig"});
+    defer root_scope.deinit();
+    var positive = try root_scope.should();
+    defer positive.deinit();
+    var terminal = try positive.haveName(.{ .glob = "root.zig" });
+    defer terminal.deinit(std.testing.allocator);
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    var options = AssertionOptions.init(CheckOptions.init(std.testing.allocator, std.testing.io));
+    options.check.clear_cache = true;
+    options.failure_writer = &output.writer;
+    try expectPasses(&terminal, options);
+    try std.testing.expectEqual(@as(usize, 0), output.written().len);
 }
 
 test {
