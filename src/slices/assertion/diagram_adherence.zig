@@ -28,8 +28,19 @@ pub fn gatherDiagramAdherenceViolations(
 ) GatherError!ViolationList {
     var result: ViolationList = .{};
     errdefer result.deinit(allocator);
+    const ordered = try allocator.alloc(*const ProjectedEdge, edges.len);
+    defer allocator.free(ordered);
+    for (edges, ordered) |*edge, *destination| destination.* = edge;
+    std.mem.sort(*const ProjectedEdge, ordered, {}, struct {
+        fn lessThan(_: void, left: *const ProjectedEdge, right: *const ProjectedEdge) bool {
+            const source_order = std.mem.order(u8, left.source_label, right.source_label);
+            if (source_order != .eq) return source_order == .lt;
+            return std.mem.order(u8, left.target_label, right.target_label) == .lt;
+        }
+    }.lessThan);
 
-    for (edges) |edge| {
+    for (ordered) |edge_pointer| {
+        const edge = edge_pointer.*;
         if (diagram.allows(edge.source_label, edge.target_label)) continue;
         if (options.ignore_external_slices and isPurelyExternal(edge)) continue;
         if (options.ignore_orphan_slices and
@@ -40,7 +51,7 @@ pub fn gatherDiagramAdherenceViolations(
 
     for (diagram.dependencyItems()) |expected| {
         if (findDependency(edges, expected.source, expected.target)) |actual| {
-            if (!options.ignore_external_slices or !isPurelyExternal(actual)) continue;
+            if (!options.ignore_external_slices or !isPurelyExternal(actual.*)) continue;
             if (!containsLabel(internal_labels, expected.target)) continue;
         } else if (options.ignore_external_slices and
             !containsLabel(internal_labels, expected.target))
@@ -76,8 +87,8 @@ fn findDependency(
     edges: []const ProjectedEdge,
     source: []const u8,
     target: []const u8,
-) ?ProjectedEdge {
-    for (edges) |edge| {
+) ?*const ProjectedEdge {
+    for (edges) |*edge| {
         if (std.mem.eql(u8, edge.source_label, source) and
             std.mem.eql(u8, edge.target_label, target)) return edge;
     }

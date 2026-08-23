@@ -184,8 +184,8 @@ pub const PlantUmlParseResult = union(enum) {
 const RawComponent = struct {
     name: []const u8,
     alias: ?[]const u8,
-    line: usize,
     column: usize,
+    alias_column: ?usize,
 };
 
 const EndpointKind = enum { component, alias };
@@ -256,7 +256,7 @@ pub fn parsePlantUml(allocator: Allocator, text: []const u8) Allocator.Error!Pla
                         if (component.alias != null and earlier.alias != null and
                             std.mem.eql(u8, earlier.alias.?, component.alias.?))
                         {
-                            return .{ .invalid = diagnostic(.duplicate_alias, line_number, aliasColumn(line, statement_column)) };
+                            return .{ .invalid = diagnostic(.duplicate_alias, line_number, component.alias_column.?) };
                         }
                     }
                     try components.append(allocator, component);
@@ -309,6 +309,7 @@ fn parseComponent(
     index = closing + 1;
     skipWhitespace(line, &index);
     var component_alias: ?[]const u8 = null;
+    var component_alias_column: ?usize = null;
     if (index < line.len) {
         if (!startsKeyword(line[index..], "as")) {
             return .{ .invalid = diagnostic(.malformed_component, line_number, statement_column + index) };
@@ -321,6 +322,7 @@ fn parseComponent(
         const alias_start = index;
         while (index < line.len and !std.ascii.isWhitespace(line[index])) index += 1;
         component_alias = line[alias_start..index];
+        component_alias_column = statement_column + alias_start;
         if (!validAlias(component_alias.?)) {
             return .{ .invalid = diagnostic(.invalid_alias, line_number, statement_column + alias_start) };
         }
@@ -332,8 +334,8 @@ fn parseComponent(
     return .{ .value = .{
         .name = name,
         .alias = component_alias,
-        .line = line_number,
         .column = statement_column + open + 1,
+        .alias_column = component_alias_column,
     } };
 }
 
@@ -594,11 +596,6 @@ fn columnOf(line: []const u8, slice: []const u8) usize {
     return @intFromPtr(slice.ptr) - @intFromPtr(line.ptr) + 1;
 }
 
-fn aliasColumn(line: []const u8, statement_column: usize) usize {
-    const found = std.mem.indexOf(u8, line, " as ") orelse return statement_column;
-    return statement_column + found + 4;
-}
-
 fn diagnostic(kind: PlantUmlDiagnosticKind, line: usize, column: usize) PlantUmlDiagnostic {
     return .{ .kind = kind, .line = line, .column = column };
 }
@@ -639,9 +636,9 @@ fn parseSuccess(allocator: Allocator, text: []const u8) !PlantUmlDiagram {
 test "parser resolves aliases both arrows comments directives and implicit components" {
     var diagram = try parseSuccess(std.testing.allocator, "' heading\n" ++
         "@startuml Architecture\n" ++
+        "  A -> S\n" ++
         "  component [API] as A\n" ++
         "  component [Services] as S\n" ++
-        "  A -> S\n" ++
         "  [Services] --> [Models] ' implicit target\n" ++
         "  A -> S\n" ++
         "// footer comment\n" ++
