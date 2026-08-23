@@ -5,6 +5,7 @@ const common_error = @import("../../common/error.zig");
 const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
+const matching_files = @import("../assertion/matching_files.zig");
 const file_cycles = @import("../projection/file_cycles.zig");
 
 const Allocator = std.mem.Allocator;
@@ -78,7 +79,8 @@ const CompiledPattern = struct {
         target: PatternTarget,
     ) BuilderError!CompiledPattern {
         if (pattern.source().len == 0) return error.InvalidPattern;
-        var filter = Filter.init(allocator, pattern, target, .partial) catch |failure| {
+        const matching_mode = matchingModeFor(pattern);
+        var filter = Filter.init(allocator, pattern, target, matching_mode) catch |failure| {
             return mapPatternFailure(failure);
         };
         errdefer filter.deinit();
@@ -88,7 +90,7 @@ const CompiledPattern = struct {
                 selector_index,
                 pattern,
                 target,
-                .partial,
+                matching_mode,
             ),
             .filter = filter,
         };
@@ -473,6 +475,18 @@ pub const FilesShould = struct {
     pub fn haveNoCycles(self: *const FilesShould) BuilderError!FilesHaveNoCycles {
         return .{ .rule = try self.rule.clone() };
     }
+
+    pub fn haveName(self: *const FilesShould, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .filename);
+    }
+
+    pub fn beInFolder(self: *const FilesShould, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .path_without_filename);
+    }
+
+    pub fn beInPath(self: *const FilesShould, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .path);
+    }
 };
 
 /// Positive terminal rule for elementary cycles in the selected internal file graph.
@@ -494,17 +508,7 @@ pub const FilesHaveNoCycles = struct {
     }
 
     pub fn check(self: *const FilesHaveNoCycles, options: CheckOptions) anyerror!assertion.ViolationList {
-        var diagnostics = common_error.ErrorContext.init(options.allocator);
-        defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
-            options.allocator,
-            options.io,
-            self.rule.scope.projectLocator(),
-            options.working_directory,
-            options.extraction,
-            options.clear_cache,
-            &diagnostics,
-        );
+        var graph = try extractRuleGraph(&self.rule, options);
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
     }
@@ -518,7 +522,7 @@ pub const FilesHaveNoCycles = struct {
         defer selected.deinit();
         if (selected.len() == 0) {
             if (options.allow_empty_tests) return .{};
-            return self.emptySelection(options.allocator);
+            return emptySelection(&self.rule, options.allocator, "files.have_no_cycles");
         }
 
         var cycles = try file_cycles.projectSelectedFileCycles(
@@ -539,26 +543,82 @@ pub const FilesHaveNoCycles = struct {
         }
         return result;
     }
+};
 
-    fn emptySelection(
-        self: *const FilesHaveNoCycles,
-        allocator: Allocator,
-    ) anyerror!assertion.ViolationList {
-        var scope = try self.rule.scopePatterns(allocator);
-        defer scope.deinit(allocator);
-        var payload = try assertion.EmptyTestViolation.init(
-            allocator,
-            "files.have_no_cycles",
-            scope.items(),
-            false,
-        );
-        var violation = assertion.Violation.fromEmptyTestMove(&payload);
-        var result = assertion.ViolationList{};
-        result.appendMove(allocator, &violation) catch |failure| {
-            violation.deinit(allocator);
-            return failure;
+/// Shared terminal for name, folder, and full-path predicates in either mood.
+pub const FilesMatchPattern = struct {
+    rule: FileRuleContext,
+    predicate: CompiledPattern,
+
+    fn init(
+        source_rule: *const FileRuleContext,
+        pattern: Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesMatchPattern {
+        var result = FilesMatchPattern{
+            .rule = try source_rule.clone(),
+            .predicate = undefined,
         };
+        errdefer result.rule.deinit();
+        result.predicate = try CompiledPattern.initPattern(
+            source_rule.scope.allocator,
+            0,
+            pattern,
+            target,
+        );
         return result;
+    }
+
+    pub fn deinit(self: *FilesMatchPattern, allocator: Allocator) void {
+        _ = allocator;
+        self.predicate.deinit(self.rule.scope.allocator);
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const FilesMatchPattern, allocator: Allocator) Allocator.Error![]u8 {
+        const prefix = try self.rule.description(allocator);
+        defer allocator.free(prefix);
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        output.writer.print("{s}, {s} ", .{ prefix, predicatePhrase(self.predicate.evidence.target) }) catch
+            return error.OutOfMemory;
+        if (self.predicate.evidence.syntax == .regex) {
+            output.writer.writeAll("regex ") catch return error.OutOfMemory;
+        }
+        output.writer.print("\"{f}\"", .{std.zig.fmtString(self.predicate.evidence.expression)}) catch
+            return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
+    pub fn check(self: *const FilesMatchPattern, options: CheckOptions) anyerror!assertion.ViolationList {
+        var graph = try extractRuleGraph(&self.rule, options);
+        defer graph.deinit(options.allocator);
+        return self.checkGraph(options, &graph);
+    }
+
+    fn checkGraph(
+        self: *const FilesMatchPattern,
+        options: CheckOptions,
+        graph: *const Graph,
+    ) anyerror!assertion.ViolationList {
+        var selected = try self.rule.select(graph);
+        defer selected.deinit();
+        if (selected.len() == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelection(
+                &self.rule,
+                options.allocator,
+                ruleIdForTarget(self.predicate.evidence.target),
+            );
+        }
+        return matching_files.gatherMatchingFileViolations(
+            options.allocator,
+            selected.items(),
+            &self.predicate.filter,
+            self.predicate.evidence,
+            self.rule.mood(),
+        );
     }
 };
 
@@ -590,6 +650,18 @@ pub const FilesShouldNot = struct {
     pub fn description(self: *const FilesShouldNot, allocator: Allocator) Allocator.Error![]u8 {
         return self.rule.description(allocator);
     }
+
+    pub fn haveName(self: *const FilesShouldNot, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .filename);
+    }
+
+    pub fn beInFolder(self: *const FilesShouldNot, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .path_without_filename);
+    }
+
+    pub fn beInPath(self: *const FilesShouldNot, pattern: Pattern) BuilderError!FilesMatchPattern {
+        return FilesMatchPattern.init(&self.rule, pattern, .path);
+    }
 };
 
 pub fn projectFiles(allocator: Allocator, options: ProjectOptions) BuilderError!FilesScope {
@@ -604,11 +676,72 @@ fn mapPatternFailure(failure: anyerror) BuilderError {
     return if (failure == error.OutOfMemory) error.OutOfMemory else error.InvalidPattern;
 }
 
+fn matchingModeFor(pattern: Pattern) matching.MatchingMode {
+    return switch (pattern) {
+        .glob => .exact,
+        .regex => .partial,
+    };
+}
+
+fn extractRuleGraph(rule: *const FileRuleContext, options: CheckOptions) anyerror!Graph {
+    var diagnostics = common_error.ErrorContext.init(options.allocator);
+    defer diagnostics.deinit();
+    return extraction.extractProjectGraph(
+        options.allocator,
+        options.io,
+        rule.scope.projectLocator(),
+        options.working_directory,
+        options.extraction,
+        options.clear_cache,
+        &diagnostics,
+    );
+}
+
+fn emptySelection(
+    rule: *const FileRuleContext,
+    allocator: Allocator,
+    rule_id: []const u8,
+) anyerror!assertion.ViolationList {
+    var scope = try rule.scopePatterns(allocator);
+    defer scope.deinit(allocator);
+    var payload = try assertion.EmptyTestViolation.init(
+        allocator,
+        rule_id,
+        scope.items(),
+        rule.mood().isNegated(),
+    );
+    var violation = assertion.Violation.fromEmptyTestMove(&payload);
+    var result = assertion.ViolationList{};
+    result.appendMove(allocator, &violation) catch |failure| {
+        violation.deinit(allocator);
+        return failure;
+    };
+    return result;
+}
+
 fn selectorPhrase(pattern: ScopePattern) []const u8 {
     return switch (pattern.target) {
         .filename => "with name",
         .path_without_filename => "in folder",
         .path => if (pattern.syntax == .literal) "in file" else "in path",
+        .declaration_name => unreachable,
+    };
+}
+
+fn predicatePhrase(target: PatternTarget) []const u8 {
+    return switch (target) {
+        .filename => "have name",
+        .path_without_filename => "be in folder",
+        .path => "be in path",
+        .declaration_name => unreachable,
+    };
+}
+
+fn ruleIdForTarget(target: PatternTarget) []const u8 {
+    return switch (target) {
+        .filename => "files.have_name",
+        .path_without_filename => "files.be_in_folder",
+        .path => "files.be_in_path",
         .declaration_name => unreachable,
     };
 }
@@ -835,6 +968,233 @@ test "mood stages prevent repeated or out-of-order fluent grammar and offer no s
 test "have no cycles is available only in the positive mood" {
     try std.testing.expect(@hasDecl(FilesShould, "haveNoCycles"));
     try std.testing.expect(!@hasDecl(FilesShouldNot, "haveNoCycles"));
+}
+
+test "all self-contained matching predicates exist in both moods and end the grammar" {
+    inline for ([_][]const u8{ "haveName", "beInFolder", "beInPath" }) |predicate| {
+        try std.testing.expect(@hasDecl(FilesShould, predicate));
+        try std.testing.expect(@hasDecl(FilesShouldNot, predicate));
+        try std.testing.expect(!@hasDecl(FilesMatchPattern, predicate));
+    }
+    inline for ([_][]const u8{ "should", "shouldNot", "withName", "inFolder", "inPath", "inFile" }) |stage| {
+        try std.testing.expect(!@hasDecl(FilesMatchPattern, stage));
+    }
+}
+
+fn matchingGraph(allocator: Allocator) !Graph {
+    var graph: Graph = .{};
+    errdefer graph.deinit(allocator);
+    for ([_][]const u8{
+        "root.zig",
+        "src/api/handler.zig",
+        "src/domain/order.zig",
+        "src/domain/order_test.zig",
+    }) |path| try graph.add(allocator, path, path, false, extraction.ImportKinds.initEmpty());
+    graph.sort();
+    return graph;
+}
+
+fn selectedMatchingScope(allocator: Allocator) !FilesScope {
+    var entry = try projectFiles(allocator, .{});
+    defer entry.deinit();
+    var folders = try entry.inFolder(&.{
+        .{ .glob = "src/api" },
+        .{ .glob = "src/domain" },
+    });
+    defer folders.deinit();
+    return folders.withName(&.{
+        .{ .glob = "handler.zig" },
+        .{ .glob = "order*.zig" },
+    });
+}
+
+fn checkPatternGraph(
+    terminal: *const FilesMatchPattern,
+    allocator: Allocator,
+    graph: *const Graph,
+) !assertion.ViolationList {
+    return terminal.checkGraph(CheckOptions.init(allocator, std.testing.io), graph);
+}
+
+test "name folder and path predicates use one pure mood path over multiple subject selectors" {
+    var graph = try matchingGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try selectedMatchingScope(std.testing.allocator);
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var negated = try scope.shouldNot();
+    defer negated.deinit();
+
+    var positive_name = try positive.haveName(.{ .glob = "order*.zig" });
+    defer positive_name.deinit(std.testing.allocator);
+    var positive_name_result = try checkPatternGraph(&positive_name, std.testing.allocator, &graph);
+    defer positive_name_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), positive_name_result.items().len);
+    try std.testing.expectEqualStrings(
+        "src/api/handler.zig",
+        positive_name_result.items()[0].matching.subject_path,
+    );
+    try std.testing.expectEqual(matching.PatternTarget.filename, positive_name_result.items()[0].matching.target);
+    try std.testing.expectEqual(matching.MatchingMode.exact, positive_name_result.items()[0].matching.matching_mode);
+
+    var negated_name = try negated.haveName(.{ .glob = "order*.zig" });
+    defer negated_name.deinit(std.testing.allocator);
+    var negated_name_result = try checkPatternGraph(&negated_name, std.testing.allocator, &graph);
+    defer negated_name_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), negated_name_result.items().len);
+    try std.testing.expectEqual(assertion.Mood.should_not, negated_name_result.items()[0].matching.mood);
+
+    var positive_folder = try positive.beInFolder(.{ .glob = "src/domain" });
+    defer positive_folder.deinit(std.testing.allocator);
+    var positive_folder_result = try checkPatternGraph(&positive_folder, std.testing.allocator, &graph);
+    defer positive_folder_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), positive_folder_result.items().len);
+    try std.testing.expectEqual(matching.PatternTarget.path_without_filename, positive_folder_result.items()[0].matching.target);
+
+    var negated_folder = try negated.beInFolder(.{ .glob = "src/domain" });
+    defer negated_folder.deinit(std.testing.allocator);
+    var negated_folder_result = try checkPatternGraph(&negated_folder, std.testing.allocator, &graph);
+    defer negated_folder_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), negated_folder_result.items().len);
+
+    var positive_path = try positive.beInPath(.{ .regex = "domain" });
+    defer positive_path.deinit(std.testing.allocator);
+    var positive_path_result = try checkPatternGraph(&positive_path, std.testing.allocator, &graph);
+    defer positive_path_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), positive_path_result.items().len);
+    try std.testing.expectEqual(matching.PatternTarget.path, positive_path_result.items()[0].matching.target);
+    try std.testing.expectEqual(matching.MatchingMode.partial, positive_path_result.items()[0].matching.matching_mode);
+
+    var negated_path = try negated.beInPath(.{ .regex = "domain" });
+    defer negated_path.deinit(std.testing.allocator);
+    var negated_path_result = try checkPatternGraph(&negated_path, std.testing.allocator, &graph);
+    defer negated_path_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), negated_path_result.items().len);
+}
+
+test "matching predicate construction owns patterns and rejects invalid expressions immediately" {
+    var scope = try projectFiles(std.testing.allocator, .{});
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var source = [_]u8{ '*', '.', 'z', 'i', 'g' };
+    var terminal = try positive.haveName(.{ .glob = &source });
+    defer terminal.deinit(std.testing.allocator);
+    @memset(&source, 'x');
+    const description = try terminal.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+
+    try std.testing.expectEqualStrings("project files, should, have name \"*.zig\"", description);
+    try std.testing.expectError(error.InvalidPattern, positive.haveName(.{ .regex = "(" }));
+}
+
+test "matching predicates run through extraction and treat root files as folder dot" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var root_scope = try entry.inFile(&.{"root.zig"});
+    defer root_scope.deinit();
+    var positive = try root_scope.should();
+    defer positive.deinit();
+    var terminal = try positive.beInFolder(.{ .glob = "." });
+    defer terminal.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try terminal.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.passes());
+}
+
+fn expectEmptyMatchingRule(
+    terminal: *const FilesMatchPattern,
+    expected_rule_id: []const u8,
+    expected_negated: bool,
+) !void {
+    var graph = try matchingGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var result = try terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, result.items()[0].kind());
+    try std.testing.expectEqualStrings(expected_rule_id, result.items()[0].empty_test.rule_id);
+    try std.testing.expectEqual(expected_negated, result.items()[0].empty_test.is_negated);
+}
+
+test "matching predicates share predicate-specific empty guards in both moods" {
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var missing = try entry.inPath(&.{.{ .glob = "missing/**" }});
+    defer missing.deinit();
+    var positive = try missing.should();
+    defer positive.deinit();
+    var negated = try missing.shouldNot();
+    defer negated.deinit();
+    var name = try positive.haveName(.{ .glob = "*.zig" });
+    defer name.deinit(std.testing.allocator);
+    try expectEmptyMatchingRule(&name, "files.have_name", false);
+    var folder = try negated.beInFolder(.{ .glob = "src" });
+    defer folder.deinit(std.testing.allocator);
+    try expectEmptyMatchingRule(&folder, "files.be_in_folder", true);
+    var path = try positive.beInPath(.{ .glob = "src/**" });
+    defer path.deinit(std.testing.allocator);
+    try expectEmptyMatchingRule(&path, "files.be_in_path", false);
+
+    var graph = try matchingGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.allow_empty_tests = true;
+    var allowed = try path.checkGraph(options, &graph);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+test "matching terminal moves safely into a heterogeneous Checkable" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var root_scope = try entry.inFile(&.{"root.zig"});
+    defer root_scope.deinit();
+    var positive = try root_scope.should();
+    defer positive.deinit();
+    var terminal = try positive.haveName(.{ .glob = "root.zig" });
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try erased.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.passes());
+}
+
+fn exerciseMatchingTerminalAllocationFailures(allocator: Allocator) !void {
+    var graph = try matchingGraph(allocator);
+    defer graph.deinit(allocator);
+    var entry = try projectFiles(allocator, .{});
+    defer entry.deinit();
+    var scope = try entry.inFolder(&.{
+        .{ .glob = "src/api" },
+        .{ .glob = "src/domain" },
+    });
+    defer scope.deinit();
+    var positive = try scope.should();
+    defer positive.deinit();
+    var terminal = try positive.haveName(.{ .regex = "order" });
+    defer terminal.deinit(allocator);
+    var result = try terminal.checkGraph(CheckOptions.init(allocator, std.testing.io), &graph);
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+}
+
+test "matching terminal cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseMatchingTerminalAllocationFailures,
+        .{},
+    );
 }
 
 fn checkCycleFixture(locator: []const u8) !assertion.ViolationList {

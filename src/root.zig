@@ -30,6 +30,7 @@ pub const FileResolutionInput = extraction.FileResolutionInput;
 pub const FileBuilderError = file_rules.BuilderError;
 pub const FilesScope = file_rules.FilesScope;
 pub const FilesHaveNoCycles = file_rules.FilesHaveNoCycles;
+pub const FilesMatchPattern = file_rules.FilesMatchPattern;
 pub const FilesShould = file_rules.FilesShould;
 pub const FilesShouldNot = file_rules.FilesShouldNot;
 pub const Graph = extraction.Graph;
