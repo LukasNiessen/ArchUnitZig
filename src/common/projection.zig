@@ -18,6 +18,7 @@ pub const perInternalEdge = @import("projection/edge_projections.zig").perIntern
 
 test {
     _ = @import("projection/cycles/adjacency.zig");
+    _ = @import("projection/cycles/johnson.zig");
     _ = @import("projection/cycles/tarjan.zig");
     _ = @import("projection/edge_projections.zig");
     _ = @import("projection/mapped_edge.zig");
