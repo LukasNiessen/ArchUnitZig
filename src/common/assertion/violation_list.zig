@@ -44,6 +44,18 @@ pub const ViolationList = struct {
         try self.appendMove(allocator, &cloned);
     }
 
+    /// Moves every item from `other` after reserving enough capacity. Allocation failure leaves both
+    /// lists unchanged; success leaves `other` empty but still valid and deinitializable.
+    pub fn appendListMove(
+        self: *ViolationList,
+        allocator: Allocator,
+        other: *ViolationList,
+    ) Allocator.Error!void {
+        try self.storage.ensureUnusedCapacity(allocator, other.storage.items.len);
+        for (other.storage.items) |violation| self.storage.appendAssumeCapacity(violation);
+        other.storage.items.len = 0;
+    }
+
     pub fn clone(self: *const ViolationList, allocator: Allocator) Violation.CloneError!ViolationList {
         var result = ViolationList{};
         errdefer result.deinit(allocator);
@@ -75,6 +87,28 @@ test "empty violation list passes and moved violation makes it fail" {
 
     try std.testing.expect(!list.passes());
     try std.testing.expectEqual(@as(usize, 1), list.items().len);
+}
+
+test "moving a list transfers all payload ownership" {
+    var source = ViolationList{};
+    defer source.deinit(std.testing.allocator);
+    var first = try emptyViolation(std.testing.allocator, "files.have_name");
+    source.appendMove(std.testing.allocator, &first) catch |err| {
+        first.deinit(std.testing.allocator);
+        return err;
+    };
+    var second = try emptyViolation(std.testing.allocator, "files.be_in_path");
+    source.appendMove(std.testing.allocator, &second) catch |err| {
+        second.deinit(std.testing.allocator);
+        return err;
+    };
+    var destination = ViolationList{};
+    defer destination.deinit(std.testing.allocator);
+
+    try destination.appendListMove(std.testing.allocator, &source);
+
+    try std.testing.expect(source.passes());
+    try std.testing.expectEqual(@as(usize, 2), destination.items().len);
 }
 
 fn exerciseAllocationFailures(allocator: Allocator) !void {
