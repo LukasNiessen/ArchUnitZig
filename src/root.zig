@@ -10,6 +10,7 @@ const file_rules = @import("files.zig");
 const fluentapi = @import("common/fluentapi.zig");
 const matching = @import("common/matching.zig");
 const projection = @import("common/projection.zig");
+const testing_support = @import("testing.zig");
 
 pub const Edge = extraction.Edge;
 pub const BuildGraphMode = extraction.BuildGraphMode;
@@ -20,6 +21,7 @@ pub const DiagnosticCode = common_error.DiagnosticCode;
 pub const DependencyReference = extraction.DependencyReference;
 pub const DiagnosticKind = extraction.DiagnosticKind;
 pub const EmptyTestViolation = assertion.EmptyTestViolation;
+pub const CycleViolation = assertion.CycleViolation;
 pub const EnumerationOptions = extraction.EnumerationOptions;
 pub const ErrorCategory = common_error.ErrorCategory;
 pub const ErrorContext = common_error.ErrorContext;
@@ -103,6 +105,7 @@ pub const validateModuleResolutionOverrides = extraction.validateModuleResolutio
 pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
 pub const extractProjectGraph = extraction.extractProjectGraph;
 pub const files = file_rules.files;
+pub const formatCyclePath = testing_support.formatCyclePath;
 pub const identity = projection.identity;
 pub const perEdge = projection.perEdge;
 pub const perExternalEdge = projection.perExternalEdge;
@@ -131,4 +134,5 @@ test {
     _ = @import("common/matching.zig");
     _ = @import("common/projection.zig");
     _ = @import("files.zig");
+    _ = @import("testing.zig");
 }
