@@ -2486,6 +2486,73 @@ test "adhereTo terminal cleans up every allocation failure" {
     );
 }
 
+fn expectEmptyGuardForTerminal(
+    terminal: anytype,
+    expected_rule_id: []const u8,
+    expected_negated: bool,
+) !void {
+    var rejected = try terminal.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer rejected.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), rejected.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, rejected.items()[0].kind());
+    try std.testing.expectEqualStrings(expected_rule_id, rejected.items()[0].empty_test.rule_id);
+    try std.testing.expectEqual(expected_negated, rejected.items()[0].empty_test.is_negated);
+    try std.testing.expectEqual(@as(usize, 1), rejected.items()[0].empty_test.scope.len);
+    try std.testing.expectEqualStrings(
+        "src/servcies",
+        rejected.items()[0].empty_test.scope[0].expression,
+    );
+
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.allow_empty_tests = true;
+    var allowed = try terminal.check(options);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+test "every public file terminal shares the real-fixture empty subject guard" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var misspelled = try entry.inFolder(&.{.{ .glob = "src/servcies" }});
+    defer misspelled.deinit();
+    var positive = try misspelled.should();
+    defer positive.deinit();
+    var negative = try misspelled.shouldNot();
+    defer negative.deinit();
+
+    var cycles = try positive.haveNoCycles();
+    defer cycles.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&cycles, "files.have_no_cycles", false);
+
+    var name = try negative.haveName(.{ .glob = "*.zig" });
+    defer name.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&name, "files.have_name", true);
+
+    var folder = try negative.beInFolder(.{ .glob = "src" });
+    defer folder.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&folder, "files.be_in_folder", true);
+
+    var path = try negative.beInPath(.{ .glob = "src/**" });
+    defer path.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&path, "files.be_in_path", true);
+
+    var dependency_builder = try positive.dependOnFiles();
+    defer dependency_builder.deinit();
+    var dependency = try dependency_builder.inFolder(&.{.{ .glob = "src/domain" }});
+    defer dependency.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&dependency, "files.depend_on_files.subject", false);
+
+    var external_builder = try negative.dependOnExternalModules();
+    defer external_builder.deinit();
+    var external = try external_builder.matching(&.{.{ .glob = "std" }});
+    defer external.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&external, "files.depend_on_external_modules.subject", true);
+
+    var custom = try positive.adhereTo(predicateCheckFailure, "callback must not run");
+    defer custom.deinit(std.testing.allocator);
+    try expectEmptyGuardForTerminal(&custom, "files.adhere_to", false);
+}
+
 fn checkCycleFixture(locator: []const u8) !assertion.ViolationList {
     var entry = try projectFiles(std.testing.allocator, .{ .locator = locator });
     defer entry.deinit();
