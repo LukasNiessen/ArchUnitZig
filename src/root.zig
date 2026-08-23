@@ -12,8 +12,5 @@ pub const ImportKinds = extraction.ImportKinds;
 
 test {
     _ = std.testing;
-    _ = @import("common/extraction/edge.zig");
-    _ = @import("common/extraction/graph.zig");
-    _ = @import("common/extraction/identifier.zig");
-    _ = @import("common/extraction/import_kind.zig");
+    _ = @import("common/extraction.zig");
 }
