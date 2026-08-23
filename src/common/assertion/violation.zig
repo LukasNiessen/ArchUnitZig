@@ -13,6 +13,12 @@ pub const Violation = union(enum) {
     pub const Kind = std.meta.Tag(Violation);
     pub const CloneError = empty_test.InitError;
 
+    pub fn fromEmptyTestMove(payload: *EmptyTestViolation) Violation {
+        const result = Violation{ .empty_test = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
     pub fn kind(self: Violation) Kind {
         return std.meta.activeTag(self);
     }
@@ -51,8 +57,7 @@ test "tagged union exposes exhaustive presentation dispatch without formatting p
         &.{},
         false,
     );
-    var violation = Violation{ .empty_test = payload };
-    payload = undefined;
+    var violation = Violation.fromEmptyTestMove(&payload);
     defer violation.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(Violation.Kind.empty_test, violation.kind());
@@ -69,8 +74,7 @@ test "violation clone owns independent payload storage" {
         &.{},
         false,
     );
-    var original = Violation{ .empty_test = payload };
-    payload = undefined;
+    var original = Violation.fromEmptyTestMove(&payload);
     defer original.deinit(std.testing.allocator);
     var cloned = try original.clone(std.testing.allocator);
     defer cloned.deinit(std.testing.allocator);

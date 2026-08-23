@@ -53,12 +53,13 @@ pub const ViolationList = struct {
 };
 
 fn emptyViolation(allocator: Allocator, rule_id: []const u8) !Violation {
-    return .{ .empty_test = try violation_module.EmptyTestViolation.init(
+    var payload = try violation_module.EmptyTestViolation.init(
         allocator,
         rule_id,
         &.{},
         false,
-    ) };
+    );
+    return Violation.fromEmptyTestMove(&payload);
 }
 
 test "empty violation list passes and moved violation makes it fail" {
