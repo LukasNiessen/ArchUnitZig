@@ -25,6 +25,7 @@ pub const SyntaxDiagnostic = @import("extraction/source_parser.zig").SyntaxDiagn
 pub const parseSource = @import("extraction/source_parser.zig").parseSource;
 pub const resolveRelativeReference = @import("extraction/relative_resolver.zig").resolveRelativeReference;
 pub const resolveModuleReference = @import("extraction/module_resolver.zig").resolveModuleReference;
+pub const validateModuleResolutionOverrides = @import("extraction/module_resolver.zig").validateModuleResolutionOverrides;
 pub const locateProject = @import("extraction/project_locator.zig").locateProject;
 
 test {

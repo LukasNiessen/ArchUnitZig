@@ -93,10 +93,22 @@ file imports as relative.
 
 Named module imports cannot be resolved from the string alone: `build.zig` supplies aliases and a
 repository may have several roots with different import tables. The path resolver returns no result
-for those kinds and never probes by appending `.zig`. The safe initial design accepts explicit
-compilation-root/module maps and preserves unresolved aliases as visible targets. Static discovery
-for common build declarations may be added when it can report its limits honestly. Running an
-arbitrary project's `build.zig` is never the default because build files are executable code.
+for those kinds and never probes by appending `.zig`. Callers instead provide explicit compilation
+units for each library, executable, test, or other root. Every unit has a stable id, optional root
+source path, and its own exact alias table; therefore the same alias can resolve differently in two
+units without a false global winner.
+
+Module results retain the raw import name, concrete source path when known, import kind, location,
+and one of `resolved_project`, `resolved_package`, `compiler_provided`, `unresolved`, `missing`, or
+`outside_project`. Project mappings pass through the root-bounded file resolver. Package mappings
+must be explicitly marked and remain external even if their checked root file is physically stored
+under the project. `std` and `builtin` are compiler-provided; `root` resolves only from the selected
+unit. Unknown aliases stay visible rather than disappearing.
+
+ArchUnitZig does not read or execute `build.zig` in the default resolver. Zig build files are
+arbitrary programs whose module tables can depend on options, targets, environment, I/O, and control
+flow. A recognizer for a few call spellings would imply completeness it cannot provide, so static
+discovery is deferred until it can expose a precise supported-form contract and diagnostics.
 
 Project discovery canonicalises an explicit directory/marker or searches upward for the nearest
 `build.zig.zon`, then `build.zig`. Source enumeration uses Zig 0.16's selective directory walker so
@@ -126,7 +138,7 @@ without retaining builders or compiled regular expressions.
 
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry the result
 allocator, empty-test/cache flags, per-check logging configuration, extraction exclusions, and an
-explicit Zig root/module map. These slices are borrowed only for the call; every returned
+explicit Zig compilation-unit/root/module map. These slices are borrowed only for the call; every returned
 `ViolationList` is owned by the supplied allocator.
 
 Heterogeneous rule collections use owned `Checkable` boxes. `fromMove` makes the transfer explicit

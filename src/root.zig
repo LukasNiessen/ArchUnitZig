@@ -63,6 +63,7 @@ pub const locateProject = extraction.locateProject;
 pub const parseSource = extraction.parseSource;
 pub const resolveRelativeReference = extraction.resolveRelativeReference;
 pub const resolveModuleReference = extraction.resolveModuleReference;
+pub const validateModuleResolutionOverrides = extraction.validateModuleResolutionOverrides;
 pub const enumerateSourceFiles = extraction.enumerateSourceFiles;
 
 test "public facade builds and runs pattern filters" {
