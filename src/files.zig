@@ -8,7 +8,9 @@ pub const ScopePatterns = @import("files/fluentapi/files.zig").ScopePatterns;
 pub const SelectedFiles = @import("files/fluentapi/files.zig").SelectedFiles;
 pub const files = @import("files/fluentapi/files.zig").files;
 pub const projectFiles = @import("files/fluentapi/files.zig").projectFiles;
+pub const gatherMatchingFileViolations = @import("files/assertion/matching_files.zig").gatherMatchingFileViolations;
 
 test {
+    _ = @import("files/assertion/matching_files.zig");
     _ = @import("files/fluentapi/files.zig");
 }
