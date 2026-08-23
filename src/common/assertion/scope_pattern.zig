@@ -29,6 +29,21 @@ pub const ScopePattern = struct {
         };
     }
 
+    pub fn initLiteral(
+        allocator: Allocator,
+        selector_index: usize,
+        expression: []const u8,
+        target: matching.PatternTarget,
+    ) Allocator.Error!ScopePattern {
+        return .{
+            .selector_index = selector_index,
+            .expression = try allocator.dupe(u8, expression),
+            .syntax = .literal,
+            .target = target,
+            .matching = .exact,
+        };
+    }
+
     pub fn clone(self: ScopePattern, allocator: Allocator) Allocator.Error!ScopePattern {
         return .{
             .selector_index = self.selector_index,
@@ -69,4 +84,15 @@ test "scope pattern owns structured selector evidence" {
     try std.testing.expectEqualStrings("*.zig", scope.expression);
     try std.testing.expectEqual(matching.PatternSyntax.glob, scope.syntax);
     try std.testing.expectEqual(matching.PatternTarget.filename, scope.target);
+}
+
+test "scope pattern describes exact literals without calling them globs or regexes" {
+    var source = [_]u8{ 's', 'r', 'c', '/', 'o', 'r', 'd', 'e', 'r', '.', 'z', 'i', 'g' };
+    var scope = try ScopePattern.initLiteral(std.testing.allocator, 1, &source, .path);
+    defer scope.deinit(std.testing.allocator);
+    @memset(&source, 'x');
+
+    try std.testing.expectEqualStrings("src/order.zig", scope.expression);
+    try std.testing.expectEqual(matching.PatternSyntax.literal, scope.syntax);
+    try std.testing.expectEqual(matching.MatchingMode.exact, scope.matching);
 }

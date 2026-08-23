@@ -7,7 +7,9 @@ const Regex = regex_module.Regex;
 
 pub const GlobError = error{CharacterClassContainsSeparator};
 pub const CompileError = Regex.CompileError || GlobError;
-pub const PatternSyntax = enum { glob, regex };
+/// How a user-facing selector expression is interpreted. `literal` is used by exact selectors such
+/// as `inFile`; it is evidence metadata rather than a compilable `Pattern` alternative.
+pub const PatternSyntax = enum { glob, regex, literal };
 
 /// A borrowed user-facing pattern. Compiling it produces an owned `Regex`.
 ///

@@ -1,0 +1,7 @@
+.{
+    .name = .files_selection_fixture,
+    .version = "0.0.0",
+    .fingerprint = 0xaaaaaaaaaaaaaaaa,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{ "build.zig.zon", "src" },
+}

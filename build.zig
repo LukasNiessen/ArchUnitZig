@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
         .root_module = archunit,
     });
     const run_module_tests = b.addRunArtifact(module_tests);
+    run_module_tests.setCwd(b.path("."));
 
     const format_check = b.addFmt(.{
         .paths = &.{ "build.zig", "build.zig.zon", "src" },
