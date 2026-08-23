@@ -8,6 +8,7 @@ const matching = @import("../../common/matching.zig");
 const pattern_module = @import("../../common/matching/pattern.zig");
 const query_options = @import("../projection/query_options.zig");
 const report = @import("../projection/report.zig");
+const rendering = @import("../rendering/renderer.zig");
 const snapshot_factory = @import("../projection/snapshot_factory.zig");
 
 const Allocator = std.mem.Allocator;
@@ -189,6 +190,81 @@ pub const ProjectGraphBuilder = struct {
         var report_snapshot = try self.snapshot(options);
         defer report_snapshot.deinit(options.allocator);
         return report_snapshot.summary;
+    }
+
+    pub fn render(
+        self: *const ProjectGraphBuilder,
+        options: CheckOptions,
+        format: rendering.GraphReportFormat,
+    ) anyerror![]u8 {
+        var report_snapshot = try self.snapshot(options);
+        defer report_snapshot.deinit(options.allocator);
+        return rendering.GraphRenderer.render(options.allocator, &report_snapshot, format);
+    }
+
+    pub fn exportReport(
+        self: *const ProjectGraphBuilder,
+        options: CheckOptions,
+        format: rendering.GraphReportFormat,
+        output_path: []const u8,
+    ) anyerror!void {
+        var report_snapshot = try self.snapshot(options);
+        defer report_snapshot.deinit(options.allocator);
+        return rendering.GraphRenderer.exportReport(
+            options.allocator,
+            options.io,
+            &report_snapshot,
+            format,
+            output_path,
+        );
+    }
+
+    pub fn toDot(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .dot);
+    }
+
+    pub fn toMermaid(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .mermaid);
+    }
+
+    pub fn toD2(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .d2);
+    }
+
+    pub fn toCsv(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .csv);
+    }
+
+    pub fn toJson(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .json);
+    }
+
+    pub fn toHtml(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
+        return self.render(options, .html);
+    }
+
+    pub fn exportAsDot(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .dot, path);
+    }
+
+    pub fn exportAsMermaid(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .mermaid, path);
+    }
+
+    pub fn exportAsD2(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .d2, path);
+    }
+
+    pub fn exportAsCsv(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .csv, path);
+    }
+
+    pub fn exportAsJson(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .json, path);
+    }
+
+    pub fn exportAsHtml(self: *const ProjectGraphBuilder, options: CheckOptions, path: []const u8) anyerror!void {
+        return self.exportReport(options, .html, path);
     }
 
     pub fn queryOptions(self: *const ProjectGraphBuilder) GraphQueryOptions {
@@ -460,4 +536,45 @@ test "real fixture composes extraction options with collapse aggregation and sum
         "assets/settings.json",
     ) == null);
     try std.testing.expectEqual(@as(usize, 5), without_resources.summary.raw_edge_count);
+}
+
+test "real fixture fluent render and export terminals share the snapshot contract" {
+    var base = try projectGraph(std.testing.allocator, .{ .locator = "test/fixtures/graph-basic" });
+    defer base.deinit();
+    var external = try base.includeExternalDependencies();
+    defer external.deinit();
+    var titled_builder = try external.titled("Fixture Graph");
+    defer titled_builder.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    const json = try titled_builder.toJson(options);
+    defer std.testing.allocator.free(json);
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("Fixture Graph", parsed.value.object.get("title").?.string);
+    try std.testing.expect(parsed.value.object.get("nodes").?.array.items.len > 0);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    const output_path = try std.fs.path.join(
+        std.testing.allocator,
+        &.{ root, "reports", "architecture.html" },
+    );
+    defer std.testing.allocator.free(output_path);
+    options.clear_cache = false;
+    try titled_builder.exportAsHtml(options, output_path);
+    const exported = try std.Io.Dir.cwd().readFileAllocOptions(
+        std.testing.io,
+        output_path,
+        std.testing.allocator,
+        .limited(std.math.maxInt(usize)),
+        .of(u8),
+        0,
+    );
+    defer std.testing.allocator.free(exported);
+    const expected = try titled_builder.toHtml(options);
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, exported);
 }

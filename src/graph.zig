@@ -4,6 +4,7 @@ const node_selection = @import("graph/projection/node_selection.zig");
 const project_graph = @import("graph/fluentapi/project_graph.zig");
 const query_options = @import("graph/projection/query_options.zig");
 const report = @import("graph/projection/report.zig");
+const renderer = @import("graph/rendering/renderer.zig");
 const snapshot_factory = @import("graph/projection/snapshot_factory.zig");
 
 pub const GraphReportNode = report.GraphReportNode;
@@ -23,10 +24,15 @@ pub const ProjectGraphBuilder = project_graph.ProjectGraphBuilder;
 pub const ProjectGraphOptions = project_graph.ProjectGraphOptions;
 pub const dependencyGraph = project_graph.dependencyGraph;
 pub const projectGraph = project_graph.projectGraph;
+pub const GraphReportFormat = renderer.GraphReportFormat;
+pub const GraphRenderError = renderer.RenderError;
+pub const GraphExportError = renderer.ExportError;
+pub const GraphRenderer = renderer.GraphRenderer;
 
 test {
     _ = @import("graph/rendering/escaping.zig");
     _ = @import("graph/rendering/json_renderer.zig");
+    _ = @import("graph/rendering/renderer.zig");
     _ = @import("graph/rendering/html_renderer.zig");
     _ = @import("graph/rendering/support.zig");
     _ = @import("graph/rendering/text_renderers.zig");
