@@ -474,12 +474,17 @@ test "definitions and policies validate names patterns duplicates and references
         LayerDefinition.init(std.testing.allocator, "api", &.{}, .path),
     );
     try std.testing.expectError(
+        error.InvalidPattern,
+        LayerDefinition.init(std.testing.allocator, "api", &.{.{ .regex = "(" }}, .path),
+    );
+    try std.testing.expectError(
         error.EmptyBlocklist,
         LayerPolicy.init(std.testing.allocator, "api", &.{}, .blocklist),
     );
 
     var first = try definition(std.testing.allocator, "api", "src/api");
     defer first.deinit(std.testing.allocator);
+    try std.testing.expect(try first.matches(std.testing.allocator, "src\\api\\handler.zig"));
     var duplicate = try definition(std.testing.allocator, "api", "legacy/api");
     defer duplicate.deinit(std.testing.allocator);
     try std.testing.expectError(
