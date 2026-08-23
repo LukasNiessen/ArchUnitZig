@@ -127,6 +127,9 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     );
     defer result.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    var cloned = try result.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expect(result.items()[0].eql(cloned.items()[0]));
 }
 
 test "file dependency gatherer cleans up every allocation failure" {
