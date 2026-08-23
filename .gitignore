@@ -1,7 +1,7 @@
 .zig-cache/
 zig-cache/
+zig-pkg/
 zig-out/
 coverage/
 *.profraw
 *.profdata
-

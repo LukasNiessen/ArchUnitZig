@@ -70,14 +70,32 @@ reviewed Zig definition preserves their meaning.
 Consequence: initial metrics cover structural counts, afferent/efferent coupling, instability,
 coupling factor, and custom callbacks.
 
+### D009 — Use zoptia0regex behind an ArchUnitZig adapter
+
+Zig 0.16 has no standard-library regex engine. ArchUnitZig pins
+[`zoptia0regex` 0.4.0](https://github.com/zoptia/zoptia0regex/tree/v0.4.0) by immutable package hash
+and exposes it only through an allocator-aware adapter. The engine ports Go's RE2-style semantics,
+supports numbered and named captures, avoids exponential backtracking, cross-compiles as Zig source,
+and uses an Apache-2.0 license with a BSD-derived notice.
+
+The alternatives evaluated for [issue #4](https://github.com/LukasNiessen/ArchUnitZig/issues/4) were:
+
+| Candidate | Result | Reason |
+| --- | --- | --- |
+| `zoptia0regex` 0.4.0 | Selected | Zig 0.16, capture groups, linear-time design, explicit allocator API |
+| `mnemnion/mvzr` 0.3.12 | Rejected | No capture groups and documents backtracking behavior |
+| `zig-utils/zig-regex` 0.2.1 | Rejected | Current package requires a Zig 0.17 development toolchain |
+| In-repository engine | Deferred | Duplicates a substantial parser/VM without improving the current contract |
+
+Before selection, the dependency passed all 51 upstream unit tests and all 14,934 committed
+differential/fuzz cases on Zig 0.16.0. ArchUnitZig additionally tests invalid expressions, captures,
+allocation failures, exact/partial behavior, and a nested-repetition adversarial input.
+
+Consequence: public code does not expose backend types. Backend replacement remains possible, while
+the adapter owns compilation state and callers supply temporary match allocations. The exact URL,
+version, hash, and notices are recorded in `build.zig.zon` and `THIRD_PARTY_LICENSES.md`.
+
 ## Open decisions
-
-### D009 — Regex backend ([issue #4](https://github.com/LukasNiessen/ArchUnitZig/issues/4))
-
-Zig 0.16 has no standard-library regex engine. Compare a pinned allocator-aware Zig implementation
-with a small in-repository linear-time engine. Required properties are capture support, predictable
-worst-case behavior, cross-compilation, clear ownership, compatible licensing, and immutable package
-hashes.
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
 
