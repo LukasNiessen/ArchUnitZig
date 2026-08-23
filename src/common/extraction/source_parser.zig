@@ -20,7 +20,7 @@ pub const SourceLocation = struct {
 
 /// An owned literal dependency reference extracted from one Zig source file.
 pub const DependencyReference = struct {
-    target: []u8,
+    target: []const u8,
     kind: ImportKind,
     location: SourceLocation,
 

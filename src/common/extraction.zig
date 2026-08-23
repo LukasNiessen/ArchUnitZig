@@ -11,10 +11,13 @@ pub const enumerateSourceFiles = @import("extraction/source_files.zig").enumerat
 pub const DependencyReference = @import("extraction/source_parser.zig").DependencyReference;
 pub const DiagnosticKind = @import("extraction/source_parser.zig").DiagnosticKind;
 pub const ParseResult = @import("extraction/source_parser.zig").ParseResult;
+pub const FileResolutionStatus = @import("extraction/relative_resolver.zig").FileResolutionStatus;
+pub const ResolvedReference = @import("extraction/relative_resolver.zig").ResolvedReference;
 pub const SourceLocation = @import("extraction/source_parser.zig").SourceLocation;
 pub const Strictness = @import("extraction/source_parser.zig").Strictness;
 pub const SyntaxDiagnostic = @import("extraction/source_parser.zig").SyntaxDiagnostic;
 pub const parseSource = @import("extraction/source_parser.zig").parseSource;
+pub const resolveRelativeReference = @import("extraction/relative_resolver.zig").resolveRelativeReference;
 pub const locateProject = @import("extraction/project_locator.zig").locateProject;
 
 test {
@@ -24,6 +27,7 @@ test {
     _ = @import("extraction/identifier.zig");
     _ = @import("extraction/import_kind.zig");
     _ = @import("extraction/project_locator.zig");
+    _ = @import("extraction/relative_resolver.zig");
     _ = @import("extraction/source_files.zig");
     _ = @import("extraction/source_parser.zig");
 }
