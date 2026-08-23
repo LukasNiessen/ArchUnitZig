@@ -362,3 +362,21 @@ compilation per appended selector because architecture rules are short and owner
 Consequence: stored half-rules can be branched safely, caller pattern/locator buffers can be released
 immediately, and allocation failures unwind one owner at a time. `select(graph)` remains pure; only a
 future terminal `check` may locate and extract the configured project.
+
+### D024 — Mood is one assertion fact behind two stage types
+
+The assertion kernel defines exactly two `Mood` values, `should` and `should_not`. Its `holds` method
+is the sole positive/negative truth inversion: assertion gatherers evaluate a predicate once and
+report it when the selected mood does not hold. They do not branch into duplicate positive and
+negative implementations.
+
+The fluent surface nevertheless exposes distinct owned `FilesShould` and `FilesShouldNot` types.
+Both are thin wrappers over one `FileRuleContext`, containing an independently cloned `FilesScope`
+and one `Mood`. This keeps `should`/`shouldNot` off the mood-stage method sets and lets a future
+positive-only predicate exist only on `FilesShould`. No synonyms are part of the grammar.
+Descriptions are rendered through the shared context from original selector evidence and differ
+only in the final mood phrase.
+
+Consequence: one stored scope can safely produce both moods, each with local `deinit()`, and future
+predicates receive one data flag instead of two code paths. The extra scope clone preserves D010's
+branching and lifetime guarantees at the mood boundary.
