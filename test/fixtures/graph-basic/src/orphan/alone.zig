@@ -1,0 +1,1 @@
+pub const alone = true;
