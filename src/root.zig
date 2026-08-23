@@ -5,6 +5,7 @@
 const std = @import("std");
 const assertion = @import("common/assertion.zig");
 const extraction = @import("common/extraction.zig");
+const fluentapi = @import("common/fluentapi.zig");
 const matching = @import("common/matching.zig");
 
 pub const Edge = extraction.Edge;
@@ -13,8 +14,14 @@ pub const Graph = extraction.Graph;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
 pub const Candidate = matching.Candidate;
+pub const CheckOptions = fluentapi.CheckOptions;
+pub const Checkable = fluentapi.Checkable;
 pub const Filter = matching.Filter;
 pub const MatchingMode = matching.MatchingMode;
+pub const LogLevel = fluentapi.LogLevel;
+pub const LoggingOptions = fluentapi.LoggingOptions;
+pub const ModuleOverride = fluentapi.ModuleOverride;
+pub const ModuleResolutionOverrides = fluentapi.ModuleResolutionOverrides;
 pub const Pattern = matching.Pattern;
 pub const PatternSyntax = matching.PatternSyntax;
 pub const PatternTarget = matching.PatternTarget;
@@ -24,6 +31,7 @@ pub const Violation = assertion.Violation;
 pub const ViolationList = assertion.ViolationList;
 pub const matchesAny = matching.matchesAny;
 pub const matchesSelectors = matching.matchesSelectors;
+pub const checkAll = fluentapi.checkAll;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
@@ -42,5 +50,6 @@ test {
     _ = std.testing;
     _ = @import("common/assertion.zig");
     _ = @import("common/extraction.zig");
+    _ = @import("common/fluentapi.zig");
     _ = @import("common/matching.zig");
 }
