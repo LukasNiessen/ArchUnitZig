@@ -9,6 +9,7 @@ const extraction = @import("common/extraction.zig");
 const file_rules = @import("files.zig");
 const fluentapi = @import("common/fluentapi.zig");
 const matching = @import("common/matching.zig");
+const layer_rules = @import("layers.zig");
 const projection = @import("common/projection.zig");
 const testing_support = @import("testing.zig");
 
@@ -26,6 +27,10 @@ pub const FileInfo = file_rules.FileInfo;
 pub const ExternalModuleDependencyViolation = assertion.ExternalModuleDependencyViolation;
 pub const LayerDependencyViolation = assertion.LayerDependencyViolation;
 pub const LayerPolicyKind = assertion.LayerPolicyKind;
+pub const DependencyPolicyKind = layer_rules.DependencyPolicyKind;
+pub const LayerDefinition = layer_rules.LayerDefinition;
+pub const LayerError = layer_rules.LayerError;
+pub const LayerPolicy = layer_rules.LayerPolicy;
 pub const CycleViolation = assertion.CycleViolation;
 pub const CustomFileViolation = assertion.CustomFileViolation;
 pub const EnumerationOptions = extraction.EnumerationOptions;
@@ -141,6 +146,7 @@ pub const expectPasses = testing_support.expectPasses;
 pub const gatherMatchingFileViolations = file_rules.gatherMatchingFileViolations;
 pub const gatherFileDependencyViolations = file_rules.gatherFileDependencyViolations;
 pub const gatherCustomFileViolations = file_rules.gatherCustomFileViolations;
+pub const gatherLayerDependencyViolations = layer_rules.gatherLayerDependencyViolations;
 pub const guardEmptyTest = assertion.guardEmptyTest;
 pub const ExternalModuleCategory = file_rules.ExternalModuleCategory;
 pub const ExternalModuleCategories = file_rules.ExternalModuleCategories;
@@ -195,5 +201,6 @@ test {
     _ = @import("common/matching.zig");
     _ = @import("common/projection.zig");
     _ = @import("files.zig");
+    _ = @import("layers.zig");
     _ = @import("testing.zig");
 }
