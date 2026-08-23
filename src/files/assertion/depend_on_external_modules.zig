@@ -88,14 +88,6 @@ pub fn gatherExternalModuleDependencyViolations(
     return result;
 }
 
-pub fn targetMatchesAny(
-    allocator: Allocator,
-    path: []const u8,
-    filters: []const *const matching.Filter,
-) Allocator.Error!bool {
-    return matchesAny(allocator, path, filters);
-}
-
 fn matchesAny(
     allocator: Allocator,
     path: []const u8,

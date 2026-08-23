@@ -578,10 +578,7 @@ pub const FilesHaveNoCycles = struct {
     ) anyerror!assertion.ViolationList {
         var selected = try self.rule.select(graph);
         defer selected.deinit();
-        if (selected.len() == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelection(&self.rule, options.allocator, "files.have_no_cycles");
-        }
+        if (try guardRuleSelection(&self.rule, selected.len(), options, "files.have_no_cycles")) |early| return early;
 
         var cycles = try file_cycles.projectSelectedFileCycles(
             options.allocator,
@@ -662,14 +659,12 @@ pub const FilesMatchPattern = struct {
     ) anyerror!assertion.ViolationList {
         var selected = try self.rule.select(graph);
         defer selected.deinit();
-        if (selected.len() == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelection(
-                &self.rule,
-                options.allocator,
-                ruleIdForTarget(self.predicate.evidence.target),
-            );
-        }
+        if (try guardRuleSelection(
+            &self.rule,
+            selected.len(),
+            options,
+            ruleIdForTarget(self.predicate.evidence.target),
+        )) |early| return early;
         return matching_files.gatherMatchingFileViolations(
             options.allocator,
             selected.items(),
@@ -792,25 +787,21 @@ pub const FilesDependOn = struct {
     ) anyerror!assertion.ViolationList {
         var subjects = try self.rule.select(graph);
         defer subjects.deinit();
-        if (subjects.len() == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelection(
-                &self.rule,
-                options.allocator,
-                "files.depend_on_files.subject",
-            );
-        }
+        if (try guardRuleSelection(
+            &self.rule,
+            subjects.len(),
+            options,
+            "files.depend_on_files.subject",
+        )) |early| return early;
         var objects = try self.objects.selectDependencyObjects(graph);
         defer objects.deinit();
-        if (objects.len() == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelectionForScope(
-                &self.objects,
-                self.rule.mood(),
-                options.allocator,
-                "files.depend_on_files.object",
-            );
-        }
+        if (try guardScopeSelection(
+            &self.objects,
+            self.rule.mood(),
+            objects.len(),
+            options,
+            "files.depend_on_files.object",
+        )) |early| return early;
 
         var edges = try projection.projectEdges(
             options.allocator,
@@ -986,14 +977,12 @@ pub const FilesExternalModules = struct {
     ) anyerror!assertion.ViolationList {
         var subjects = try self.rule.select(graph);
         defer subjects.deinit();
-        if (subjects.len() == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelection(
-                &self.rule,
-                options.allocator,
-                "files.depend_on_external_modules.subject",
-            );
-        }
+        if (try guardRuleSelection(
+            &self.rule,
+            subjects.len(),
+            options,
+            "files.depend_on_external_modules.subject",
+        )) |early| return early;
         var edges = try projection.projectEdges(options.allocator, graph, projection.perExternalEdge());
         defer edges.deinit(options.allocator);
         var filters: std.ArrayList(*const Filter) = .empty;
@@ -1002,25 +991,19 @@ pub const FilesExternalModules = struct {
         for (self.module_patterns.items) |*pattern| filters.appendAssumeCapacity(&pattern.filter);
 
         var category_edges: usize = 0;
-        var matching_targets: usize = 0;
         for (edges.items()) |edge| {
             if (!containsSelected(subjects.items(), edge.source_label) or
                 !external_assertion.edgeInCategories(edge, self.categories)) continue;
             category_edges += 1;
-            if (try external_assertion.targetMatchesAny(
-                options.allocator,
-                edge.target_label,
-                filters.items,
-            )) matching_targets += 1;
         }
-        if (category_edges == 0 or matching_targets == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelectionForCompiledPatterns(
+        if (self.rule.mood() == .should) {
+            if (try guardCompiledPatternSelection(
                 self.module_patterns.items,
                 self.rule.mood(),
-                options.allocator,
+                category_edges,
+                options,
                 "files.depend_on_external_modules.object",
-            );
+            )) |early| return early;
         }
         return external_assertion.gatherExternalModuleDependencyViolations(
             options.allocator,
@@ -1097,10 +1080,7 @@ pub const FilesAdhereTo = struct {
         for (source_files.items()) |path| {
             if (try self.rule.scope.matchesPath(path)) selected_count += 1;
         }
-        if (selected_count == 0) {
-            if (options.allow_empty_tests) return .{};
-            return emptySelection(&self.rule, options.allocator, "files.adhere_to");
-        }
+        if (try guardRuleSelection(&self.rule, selected_count, options, "files.adhere_to")) |early| return early;
 
         var result = assertion.ViolationList{};
         errdefer result.deinit(options.allocator);
@@ -1226,60 +1206,55 @@ fn extractRuleGraph(rule: *const FileRuleContext, options: CheckOptions) anyerro
     );
 }
 
-fn emptySelection(
+fn guardRuleSelection(
     rule: *const FileRuleContext,
-    allocator: Allocator,
+    matched_count: usize,
+    options: CheckOptions,
     rule_id: []const u8,
-) anyerror!assertion.ViolationList {
-    return emptySelectionForScope(&rule.scope, rule.mood(), allocator, rule_id);
+) anyerror!?assertion.ViolationList {
+    return guardScopeSelection(&rule.scope, rule.mood(), matched_count, options, rule_id);
 }
 
-fn emptySelectionForScope(
+fn guardScopeSelection(
     scope_value: *const FilesScope,
     mood: Mood,
-    allocator: Allocator,
+    matched_count: usize,
+    options: CheckOptions,
     rule_id: []const u8,
-) anyerror!assertion.ViolationList {
-    var scope = try scope_value.scopePatterns(allocator);
-    defer scope.deinit(allocator);
-    var payload = try assertion.EmptyTestViolation.init(
-        allocator,
+) anyerror!?assertion.ViolationList {
+    if (matched_count != 0) return null;
+    var scope = try scope_value.scopePatterns(options.allocator);
+    defer scope.deinit(options.allocator);
+    return assertion.guardEmptyTest(
+        options.allocator,
+        matched_count,
+        options.allow_empty_tests,
         rule_id,
         scope.items(),
-        mood.isNegated(),
+        mood,
     );
-    var violation = assertion.Violation.fromEmptyTestMove(&payload);
-    var result = assertion.ViolationList{};
-    result.appendMove(allocator, &violation) catch |failure| {
-        violation.deinit(allocator);
-        return failure;
-    };
-    return result;
 }
 
-fn emptySelectionForCompiledPatterns(
+fn guardCompiledPatternSelection(
     patterns: []const CompiledPattern,
     mood: Mood,
-    allocator: Allocator,
+    matched_count: usize,
+    options: CheckOptions,
     rule_id: []const u8,
-) anyerror!assertion.ViolationList {
+) anyerror!?assertion.ViolationList {
+    if (matched_count != 0) return null;
     var evidence = ScopePatterns{};
-    defer evidence.deinit(allocator);
-    try evidence.values.ensureTotalCapacity(allocator, patterns.len);
-    for (patterns) |pattern| evidence.values.appendAssumeCapacity(try pattern.evidence.clone(allocator));
-    var payload = try assertion.EmptyTestViolation.init(
-        allocator,
+    defer evidence.deinit(options.allocator);
+    try evidence.values.ensureTotalCapacity(options.allocator, patterns.len);
+    for (patterns) |pattern| evidence.values.appendAssumeCapacity(try pattern.evidence.clone(options.allocator));
+    return assertion.guardEmptyTest(
+        options.allocator,
+        matched_count,
+        options.allow_empty_tests,
         rule_id,
         evidence.items(),
-        mood.isNegated(),
+        mood,
     );
-    var violation = assertion.Violation.fromEmptyTestMove(&payload);
-    var result = assertion.ViolationList{};
-    result.appendMove(allocator, &violation) catch |failure| {
-        violation.deinit(allocator);
-        return failure;
-    };
-    return result;
 }
 
 fn containsSelected(paths: []const []const u8, wanted: []const u8) bool {
@@ -2128,7 +2103,7 @@ test "external module terminals OR repeated patterns and keep compiler modules o
         &graph,
     );
     defer empty.deinit(std.testing.allocator);
-    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, empty.items()[0].kind());
+    try std.testing.expect(empty.passes());
 
     var compiler_enabled = try compiler_default.includingCompilerModules();
     defer compiler_enabled.deinit(std.testing.allocator);
@@ -2141,7 +2116,7 @@ test "external module terminals OR repeated patterns and keep compiler modules o
     try std.testing.expectEqualStrings("std", compiler_result.items()[0].external_module_dependency.items()[0].target_label);
 }
 
-test "external module empty-object guard protects negated typos and allow-empty is explicit" {
+test "negative external absence passes while positive zero-candidate rules stay guarded" {
     var graph = try externalPolicyGraph(std.testing.allocator);
     defer graph.deinit(std.testing.allocator);
     var rule = try externalSubject(std.testing.allocator, .should_not);
@@ -2158,17 +2133,52 @@ test "external module empty-object guard protects negated typos and allow-empty 
         &graph,
     );
     defer rejected.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings(
-        "files.depend_on_external_modules.object",
-        rejected.items()[0].empty_test.rule_id,
-    );
-    try std.testing.expect(rejected.items()[0].empty_test.is_negated);
+    try std.testing.expect(rejected.passes());
 
     var options = CheckOptions.init(std.testing.allocator, std.testing.io);
     options.allow_empty_tests = true;
     var allowed = try terminal.checkGraph(options, &graph);
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expect(allowed.passes());
+
+    var positive_rule = try externalSubject(std.testing.allocator, .should);
+    defer positive_rule.deinit();
+    var positive_builder = FilesExternalModuleBuilder{
+        .rule = try positive_rule.clone(),
+        .categories = external_assertion.defaultExternalModuleCategories(),
+    };
+    defer positive_builder.deinit();
+    var positive_miss = try positive_builder.matching(&.{.{ .glob = "misspelled" }});
+    defer positive_miss.deinit(std.testing.allocator);
+    var positive_miss_result = try positive_miss.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer positive_miss_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), positive_miss_result.items().len);
+    try std.testing.expectEqual(
+        assertion.Violation.Kind.external_module_dependency,
+        positive_miss_result.items()[0].kind(),
+    );
+
+    var no_external: Graph = .{};
+    defer no_external.deinit(std.testing.allocator);
+    try no_external.add(
+        std.testing.allocator,
+        "src/client.zig",
+        "src/client.zig",
+        false,
+        extraction.ImportKinds.initEmpty(),
+    );
+    var positive_empty = try positive_miss.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &no_external,
+    );
+    defer positive_empty.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_external_modules.object",
+        positive_empty.items()[0].empty_test.rule_id,
+    );
 
     var entry = try projectFiles(std.testing.allocator, .{});
     defer entry.deinit();
