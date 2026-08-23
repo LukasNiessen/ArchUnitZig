@@ -3,7 +3,12 @@
     .version = "0.0.0",
     .fingerprint = 0xd8492c79dce02cec, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .regex = .{
+            .url = "https://github.com/zoptia/zoptia0regex/archive/refs/tags/v0.4.0.tar.gz",
+            .hash = "zoptia0regex-0.4.0-DssccdU4PwDfwLMvOZKytj_0TDy-EzmFdqOtVq-LyJy8",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -12,5 +17,6 @@
         "LICENSE",
         "README.md",
         "CONTRIBUTING.md",
+        "THIRD_PARTY_LICENSES.md",
     },
 }

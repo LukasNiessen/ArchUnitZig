@@ -9,6 +9,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const regex_dependency = b.dependency("regex", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    archunit.addImport("regex", regex_dependency.module("regex"));
 
     const module_tests = b.addTest(.{
         .root_module = archunit,
