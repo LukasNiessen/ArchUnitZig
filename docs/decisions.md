@@ -669,3 +669,39 @@ are destroyed.
 Consequence: all output formats will agree on graph content and summary counts, graph queries remain
 portable and branchable in ordinary Zig tests, collapse cannot erase Zig-specific classification
 evidence, and renderer work cannot accidentally rerun or reinterpret extraction.
+
+### D035 — Graph formats are owned views over one metadata-complete snapshot
+
+`GraphReportFormat` is a closed enum covering DOT, Mermaid, D2, CSV, JSON, and HTML. The static
+`GraphRenderer` dispatch and every `toX` helper take a completed `GraphReportSnapshot` and return an
+owned byte slice from the caller's allocator. Unlike dynamic siblings, Zig needs no runtime format
+lookup or snapshot-type check: unsupported formats and wrong input types do not compile. Mermaid is
+the one renderer that can report `DanglingEdge` when a manually assembled snapshot edge has no node
+id; snapshots produced by the factory satisfy that invariant.
+
+All formats preserve snapshot order and use LF structural line endings. DOT and D2 quote backslash,
+quote, and physical line controls. Mermaid uses stable snapshot node ids and HTML-escapes its label
+surface. CSV uses RFC 4180 field quoting and carries source, target, aggregate count, externality,
+import kinds, target classes, and target availabilities. JSON uses `std.json.Stringify`, emits the
+same complete classification data, and is round-trip tested with `std.json`. These are serialization
+decisions over existing facts; no renderer sorts, filters, or reconstructs the graph independently.
+
+Visual styling is metadata-backed. External edges are dashed or dotted. Edges whose target-class
+set contains `resource` are blue in DOT, Mermaid, and D2 and receive a resource row treatment in
+HTML. HTML also marks external rows and exposes all edge metadata. Spelling such as a file extension
+or the name `std` never decides presentation category.
+
+The HTML renderer produces one deterministic offline UTF-8 document with embedded CSS. It has no
+scripts, imports, remote URLs, fonts, or assets. Summary metrics, node and dependency tables, empty
+state, and escaped Mermaid/DOT/D2/JSON source sections are present in the file itself. Every text or
+attribute value crosses the HTML escaping boundary, including the portable source blocks.
+
+`exportReport` renders first, validates a non-blank output path, deliberately creates its parent
+hierarchy, overwrites the target, and propagates Zig's concrete directory/open/write errors.
+Format-specific export helpers delegate to it. The fluent builder's `render`, `exportReport`,
+`toX`, and `exportAsX` terminals first produce one owned snapshot using `CheckOptions`, then render;
+their returned bytes use the check allocator and their file I/O uses the check `std.Io`.
+
+Consequence: formats cannot disagree about graph membership or lose Zig classification evidence,
+hostile labels cannot break their serialization context, HTML remains portable in restricted
+environments, and library users retain explicit ownership and I/O failure handling.
