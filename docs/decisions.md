@@ -319,6 +319,27 @@ external. Both states keep their Zig-specific import kind in the cumulated raw e
 Consequence: files, layers, slices, and reports share identical internal/external semantics across
 languages, while Zig-specific selectors can still inspect kinds without changing graph topology.
 
+### D023 — Cycle discovery is iterative, directed, and deterministic
+
+Cycle discovery first normalizes projected dependencies: self-edges are removed, equal label pairs
+are collapsed, identical raw evidence is deduplicated, and the remaining labels and evidence are
+sorted lexically. Labels then receive dense integer IDs in lexical order. Tarjan identifies strongly
+connected components and Johnson enumerates elementary circuits over that normalized adjacency.
+Both algorithms, including Johnson's unblock operation, use explicit heap-backed stacks rather than
+call-stack recursion so a deep dependency chain or circuit cannot exhaust the process stack.
+
+A directed cycle is canonicalized by rotation to its lexically smallest label and emitted once.
+Opposite directions remain different cycles because dependency direction is meaningful. Results are
+sorted lexically by their vertex sequence. The public result deep-clones each projected edge and its
+raw evidence, so callers may destroy the graph or intermediate projections immediately. The
+`projectInternalCycles` convenience entry point deliberately uses `perInternalEdge`; external and
+synthetic self-edges therefore cannot create file cycles.
+
+Consequence: enumeration is stable across source and edge insertion order, parallel raw edges retain
+their combined violation evidence without multiplying circuits, and graph depth consumes allocator
+memory instead of call-stack depth. Elementary-cycle enumeration is inherently exponential in the
+number of circuits, so callers should expect output-sensitive runtime for densely cyclic graphs.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
