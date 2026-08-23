@@ -143,6 +143,24 @@ retain root-anchored versus basename semantics. Results include lowercase `.zig`
 Consequence: one analysis cannot accidentally absorb a sibling package, dependency cache, or link
 cycle. Workspace/nested-package analysis must opt in and preserve package identity in issue #48.
 
+### D014 — AST-validated, token-based dependency discovery
+
+Source extraction parses the complete file with Zig 0.16's `std.zig.Ast`, then recognizes builtin
+tokens for literal `@import`, `@embedFile`, and `@cInclude` calls inside deprecated `@cImport`.
+Targets are decoded with `std.zig.string_literal.parseAlloc` before import-kind classification.
+This combines syntax validation with a small dependency-specific token pass and avoids coupling the
+library to unstable declaration-node shapes it does not need.
+
+Strict mode maps malformed files, non-literal operands, and invalid literals to the technical
+`ParserFailure` error with owned `ErrorContext`. Permissive mode returns owned syntax diagnostics;
+an AST-invalid file contributes no partial references. Locations use a zero-based byte offset and
+one-based line/column, anchored at the dependency builtin. C headers are observable only while
+`@cImport` remains in Zig 0.16, and an `@cInclude` outside that lexical call is ignored.
+
+Consequence: comments and string contents cannot create dependencies, escaped targets are handled
+according to Zig semantics, callers can choose fail-fast versus editor-friendly analysis, and no
+project code or build script executes. A Zig upgrade must review both AST and token APIs under D001.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))

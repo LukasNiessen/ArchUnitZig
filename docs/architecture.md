@@ -69,8 +69,19 @@ The repository will enforce these rules against itself after the files API lands
 
 ## Extraction strategy
 
-ArchUnitZig uses Zig's tokenizer/AST for source syntax. Literal `@import`, `@embedFile`, and C-import
-references are found without executing the source.
+ArchUnitZig first validates each source with Zig's own AST parser, then scans the resulting token
+stream. Literal `@import`, `@embedFile`, and `@cInclude` calls nested inside deprecated `@cImport`
+are found without executing the source. String literals are decoded with Zig's standard literal
+parser before targets are classified, so escaped module names and file extensions retain their
+semantic import kind. Comments, ordinary string contents, and multiline-string contents cannot
+become false dependencies because they are not builtin tokens.
+
+Each reference owns its decoded target and records a zero-based byte offset plus one-based line and
+column for the builtin. Strict extraction maps malformed syntax, invalid literals, and non-literal
+dependency operands to the technical `ParserFailure` tag with `ErrorContext`. Permissive extraction
+returns owned syntax diagnostics instead; a file rejected by the AST contributes no partial edges.
+This policy preserves deterministic whole-file analysis while allowing callers such as editors to
+continue across broken files.
 
 Relative `.zig`, `.zon`, and embedded-file paths resolve from the importing file. Named module
 imports cannot be resolved from the string alone: `build.zig` supplies aliases and a repository may
