@@ -705,3 +705,41 @@ their returned bytes use the check allocator and their file I/O uses the check `
 Consequence: formats cannot disagree about graph membership or lose Zig classification evidence,
 hostile labels cannot break their serialization context, HTML remains portable in restricted
 environments, and library users retain explicit ownership and I/O failure handling.
+
+### D036 — Slices are single-label projections with explicit orphan and external semantics
+
+Slices reuse the normalized graph and owned `ProjectedEdge` evidence; they do not introduce a new
+extractor. `SliceProjection` is an owned cloneable union. Identity returns the normalized path. File
+suffix definitions match the stem before its final extension, reject duplicate suffix keys, and use
+the longest match with declaration order as the tie-breaker. Reusing a label intentionally merges
+files into one slice.
+
+`definedBy` contains exactly one literal `(**)` marker. It captures one non-empty normalized path
+segment and treats the declared expression as a prefix, so `src/features/(**)/` includes descendants
+of each captured feature. Its remaining glob syntax follows the shared separator, star, question,
+and character-class semantics. `definedByRegex` is an explicit partial regex, requires at least one
+capture, and uses capture group 1. Regex first-match behavior is the overlap rule: one path receives
+at most one label. A missing or empty capture makes that path an orphan for this projection.
+
+Unmatched internal endpoints and their internal edges are omitted. Duplicate mapped pairs aggregate
+all raw edges as deterministic owned evidence. Internal intra-slice and self edges are removed, but
+normalized graph self edges still establish matched isolated slice labels before edge filtering.
+When a source maps, an external target remains under its exact graph identifier with its import,
+class, availability, and location evidence. Externality is checked before same-label removal, so an
+external module named like an internal slice remains an observable dependency.
+
+`projectSlices` and `slices` own the optional locator and projection. `definedBy`,
+`definedByRegex`, and `definedByFileSuffixes` return independent branches and perform no filesystem
+I/O. Both mood stages expose `containDependency(source, target)`. Positive mood requires that direct
+projected edge and returns an evidence-free missing-edge disagreement; negative mood forbids it and
+owns the present projected edge. Negative absence is meaningful even when a named label is absent.
+The projection as a whole still uses the shared empty-test guard when it selects zero internal
+labels.
+
+The four extra slice methods described in the ArchUnitTS README but absent from its implementation
+are not copied. Adding broader dependency policies or diagram behavior requires its own specified
+Zig semantics and tests; PlantUML conformance remains issue #33.
+
+Consequence: component rules are deterministic, allocator-safe, and faithful to Zig's external
+module model; orphans, duplicates, overlaps, and missing required edges cannot acquire accidental
+behavior from a dynamic-language port.

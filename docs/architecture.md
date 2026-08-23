@@ -311,6 +311,19 @@ first-precedence assignments rather than raw selector matches. A layer dependenc
 projected edge, optional source/target assignments, and policy kind; rendering remains exclusively in
 the testing layer.
 
+`projectSlices`/`slices` projects normalized paths to one component label. `definedBy` requires one
+literal `(**)` marker and captures one non-empty path segment; `definedByRegex` uses capture group 1.
+Pure identity and file-stem suffix projections are also public. A path has at most one label,
+unmatched paths are orphans, and duplicate labels deliberately collapse files and aggregate their
+raw dependency evidence. Matched isolated files remain labels through normalized self edges.
+
+Internal intra-slice edges are removed. External targets remain exact external graph identifiers
+when their source maps, including when the identifier equals the source slice label. In both moods,
+`containDependency(source, target)` governs one direct projected edge: positive mood reports an
+absent required edge without fabricated import evidence, while negative mood reports the concrete
+forbidden edge and its locations. A projection matching no internal labels uses the universal empty
+guard; a non-empty projection does not require every label named by a negative absence rule to exist.
+
 Every terminal applies one shared empty-test guard to its subject selection. Zero subjects produce
 one `empty_test` violation by default, including under negation; `allow_empty_tests` returns an empty
 result instead. Direct file-dependency rules also guard a zero-match object scope in both moods,
