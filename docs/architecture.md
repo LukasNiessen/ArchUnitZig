@@ -108,6 +108,13 @@ and prevents a stored handle from dangling after a stack rule leaves scope. `che
 order, moves their violations into one result, and discards partial results when a later rule returns
 a user or technical error.
 
+Errors have two disjoint sets. `UserError` covers malformed patterns, unknown layers, impossible
+options, invalid paths/module overrides, and invalid fluent stages. `TechnicalError` covers I/O,
+allocation, malformed project metadata, unsupported build output, parser failure, and internal
+invariants. Native causes are mapped at the boundary rather than leaked as an unstable public set.
+An optional owned `ErrorContext` retains the stable operation, subject, and underlying cause for the
+testing/reporting layer. Architecture disagreement stays outside both sets as violation data.
+
 ## Verification strategy
 
 1. Pure algorithms use hand-built graph fixtures and exhaustive unit tests.

@@ -115,6 +115,18 @@ Consequence: erasing a rule performs one allocation and requires an explicit `de
 check one concrete rule pay neither cost. `CheckOptions.allocator` owns returned violation data,
 while borrowed exclusions and module overrides need only live through the check call.
 
+### D012 — Error tags plus optional owned diagnostic context
+
+`UserError` and `TechnicalError` are disjoint Zig error sets. User errors identify invalid API/rule
+input; technical errors identify analysis that could not be performed. Functions use those tags in
+ordinary error unions. When the tag alone is insufficient, a caller-owned `ErrorContext` records an
+owned diagnostic code, stable operation identifier, optional subject, and optional underlying Zig or
+OS error.
+
+Consequence: normal error propagation remains idiomatic and allocation-free unless context is
+requested. Recording context can itself fail only as `OutOfMemory`. A rule disagreement never enters
+either error set; it remains a `Violation` in the returned list.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
