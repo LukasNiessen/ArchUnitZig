@@ -2,12 +2,17 @@ const std = @import("std");
 
 const identifier = @import("identifier.zig");
 const import_kind = @import("import_kind.zig");
+const classifier = @import("classifier.zig");
 const source_location = @import("source_location.zig");
 
 const Allocator = std.mem.Allocator;
 pub const ImportKind = import_kind.ImportKind;
 pub const ImportKinds = import_kind.ImportKinds;
 pub const SourceLocation = source_location.SourceLocation;
+pub const TargetClass = classifier.TargetClass;
+pub const TargetClasses = std.EnumSet(TargetClass);
+pub const TargetAvailability = classifier.TargetAvailability;
+pub const TargetAvailabilities = std.EnumSet(TargetAvailability);
 
 /// One owned dependency in the extracted project graph.
 pub const Edge = struct {
@@ -15,6 +20,8 @@ pub const Edge = struct {
     target: []const u8,
     external: bool,
     import_kinds: ImportKinds,
+    target_classes: TargetClasses,
+    target_availabilities: TargetAvailabilities,
     locations: std.ArrayList(SourceLocation) = .empty,
 
     pub fn init(
@@ -35,6 +42,51 @@ pub const Edge = struct {
         import_kinds: ImportKinds,
         locations: []const SourceLocation,
     ) Allocator.Error!Edge {
+        const metadata = defaultMetadata(external, import_kinds);
+        return initWithMetadata(
+            allocator,
+            source,
+            target,
+            external,
+            import_kinds,
+            metadata.classes,
+            metadata.availabilities,
+            locations,
+        );
+    }
+
+    pub fn initClassifiedWithLocations(
+        allocator: Allocator,
+        source: []const u8,
+        target: []const u8,
+        external: bool,
+        import_kinds: ImportKinds,
+        target_class: TargetClass,
+        target_availability: TargetAvailability,
+        locations: []const SourceLocation,
+    ) Allocator.Error!Edge {
+        return initWithMetadata(
+            allocator,
+            source,
+            target,
+            external,
+            import_kinds,
+            TargetClasses.initOne(target_class),
+            TargetAvailabilities.initOne(target_availability),
+            locations,
+        );
+    }
+
+    fn initWithMetadata(
+        allocator: Allocator,
+        source: []const u8,
+        target: []const u8,
+        external: bool,
+        import_kinds: ImportKinds,
+        target_classes: TargetClasses,
+        target_availabilities: TargetAvailabilities,
+        locations: []const SourceLocation,
+    ) Allocator.Error!Edge {
         const owned_source = try identifier.normalize(allocator, source);
         errdefer allocator.free(owned_source);
 
@@ -49,6 +101,8 @@ pub const Edge = struct {
             .target = owned_target,
             .external = external,
             .import_kinds = import_kinds,
+            .target_classes = target_classes,
+            .target_availabilities = target_availabilities,
             .locations = owned_locations,
         };
         edge.sortAndDeduplicateLocations();
@@ -56,12 +110,14 @@ pub const Edge = struct {
     }
 
     pub fn clone(self: Edge, allocator: Allocator) Allocator.Error!Edge {
-        return initWithLocations(
+        return initWithMetadata(
             allocator,
             self.source,
             self.target,
             self.external,
             self.import_kinds,
+            self.target_classes,
+            self.target_availabilities,
             self.locations.items,
         );
     }
@@ -91,6 +147,8 @@ pub const Edge = struct {
             std.mem.eql(u8, self.target, other.target) and
             self.external == other.external and
             self.import_kinds.eql(other.import_kinds) and
+            self.target_classes.eql(other.target_classes) and
+            self.target_availabilities.eql(other.target_availabilities) and
             locationsEqual(self.locations.items, other.locations.items);
     }
 
@@ -110,6 +168,33 @@ pub const Edge = struct {
         self.locations.items.len = output_index;
     }
 };
+
+const Metadata = struct {
+    classes: TargetClasses,
+    availabilities: TargetAvailabilities,
+};
+
+fn defaultMetadata(external: bool, kinds: ImportKinds) Metadata {
+    if (!external) return .{
+        .classes = TargetClasses.initOne(.internal),
+        .availabilities = TargetAvailabilities.initOne(.resolved),
+    };
+    var classes = TargetClasses.initEmpty();
+    if (kinds.contains(.standard_library) or kinds.contains(.builtin_module) or kinds.contains(.root_module)) {
+        classes.insert(.compiler);
+    }
+    if (kinds.contains(.embedded_file)) classes.insert(.resource);
+    if (kinds.contains(.c_header)) classes.insert(.c_header);
+    if (kinds.contains(.named_module) or kinds.contains(.zig_file) or kinds.contains(.zon_file)) {
+        classes.insert(.external);
+    }
+    if (classes.count() == 0) classes.insert(.external);
+    const compiler_resolved = kinds.contains(.standard_library) or kinds.contains(.builtin_module);
+    return .{
+        .classes = classes,
+        .availabilities = TargetAvailabilities.initOne(if (compiler_resolved) .resolved else .unresolved),
+    };
+}
 
 fn locationsEqual(left: []const SourceLocation, right: []const SourceLocation) bool {
     if (left.len != right.len) return false;
@@ -134,6 +219,8 @@ test "an edge owns normalised identifiers and import kinds" {
     try std.testing.expect(!edge.external);
     try std.testing.expect(edge.import_kinds.contains(.zig_file));
     try std.testing.expect(edge.import_kinds.contains(.root_module));
+    try std.testing.expect(edge.target_classes.contains(.internal));
+    try std.testing.expect(edge.target_availabilities.contains(.resolved));
 }
 
 test "cloning an edge creates independent identifier storage" {
@@ -152,6 +239,37 @@ test "cloning an edge creates independent identifier storage" {
     try std.testing.expect(original.eql(cloned));
     try std.testing.expect(original.source.ptr != cloned.source.ptr);
     try std.testing.expect(original.target.ptr != cloned.target.ptr);
+    try std.testing.expect(cloned.target_classes.contains(.compiler));
+    try std.testing.expect(cloned.target_availabilities.contains(.resolved));
+}
+
+test "classified edges preserve package and unresolved availability independently" {
+    var package = try Edge.initClassifiedWithLocations(
+        std.testing.allocator,
+        "src/main.zig",
+        "database",
+        true,
+        ImportKinds.initOne(.named_module),
+        .external,
+        .resolved,
+        &.{},
+    );
+    defer package.deinit(std.testing.allocator);
+    var unresolved = try Edge.initClassifiedWithLocations(
+        std.testing.allocator,
+        "src/main.zig",
+        "telemetry",
+        true,
+        ImportKinds.initOne(.named_module),
+        .external,
+        .unresolved,
+        &.{},
+    );
+    defer unresolved.deinit(std.testing.allocator);
+
+    try std.testing.expect(package.target_availabilities.contains(.resolved));
+    try std.testing.expect(!package.target_availabilities.contains(.unresolved));
+    try std.testing.expect(unresolved.target_availabilities.contains(.unresolved));
 }
 
 test "edge locations are owned sorted and deduplicated" {
