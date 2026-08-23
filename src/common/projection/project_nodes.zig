@@ -62,16 +62,16 @@ fn makeGraph(allocator: Allocator) !Graph {
     try graph.add(
         allocator,
         "src/a.zig",
-        "src/b.zig",
-        false,
-        extraction.ImportKinds.initOne(.zig_file),
+        "std",
+        true,
+        extraction.ImportKinds.initOne(.standard_library),
     );
     try graph.add(
         allocator,
         "src/a.zig",
-        "std",
-        true,
-        extraction.ImportKinds.initOne(.standard_library),
+        "src/b.zig",
+        false,
+        extraction.ImportKinds.initOne(.zig_file),
     );
     return graph;
 }

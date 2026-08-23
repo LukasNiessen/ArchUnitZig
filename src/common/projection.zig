@@ -1,3 +1,4 @@
+pub const CycleProjectionError = @import("projection/projected_cycle.zig").CycleProjectionError;
 pub const MapFunction = @import("projection/mapped_edge.zig").MapFunction;
 pub const MappedEdge = @import("projection/mapped_edge.zig").MappedEdge;
 pub const NodeProjectionOptions = @import("projection/project_nodes.zig").NodeProjectionOptions;

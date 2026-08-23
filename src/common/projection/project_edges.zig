@@ -57,17 +57,17 @@ fn makeGraph(allocator: Allocator) !Graph {
     errdefer graph.deinit(allocator);
     try graph.add(
         allocator,
-        "src/api/handler.zig",
-        "src/domain/model.zig",
-        false,
-        extraction.ImportKinds.initOne(.zig_file),
-    );
-    try graph.add(
-        allocator,
         "src/service.zig",
         "src/domain/order.zig",
         false,
         extraction.ImportKinds.initOne(.root_module),
+    );
+    try graph.add(
+        allocator,
+        "src/api/handler.zig",
+        "src/domain/model.zig",
+        false,
+        extraction.ImportKinds.initOne(.zig_file),
     );
     try graph.add(
         allocator,

@@ -141,6 +141,8 @@ fn rawEdgeLessThan(_: void, left: Edge, right: Edge) bool {
 
 test "projected edges own labels and independent raw evidence" {
     var projected: ProjectedEdge = undefined;
+    var raw_source_pointer: [*]const u8 = undefined;
+    var mapped_source: [11]u8 = "application".*;
     {
         var raw = try Edge.init(
             std.testing.allocator,
@@ -150,17 +152,19 @@ test "projected edges own labels and independent raw evidence" {
             extraction.ImportKinds.initOne(.zig_file),
         );
         defer raw.deinit(std.testing.allocator);
+        raw_source_pointer = raw.source.ptr;
         projected = try ProjectedEdge.init(
             std.testing.allocator,
-            .{ .source_label = "application", .target_label = "domain" },
+            .{ .source_label = &mapped_source, .target_label = "domain" },
             raw,
         );
     }
     defer projected.deinit(std.testing.allocator);
+    mapped_source[0] = 'X';
 
     try std.testing.expectEqualStrings("application", projected.source_label);
     try std.testing.expectEqualStrings("src/main.zig", projected.evidence()[0].source);
-    try std.testing.expect(projected.evidence()[0].source.ptr != projected.source_label.ptr);
+    try std.testing.expect(projected.evidence()[0].source.ptr != raw_source_pointer);
 }
 
 test "cloned projected edges share no owned storage" {

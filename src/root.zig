@@ -32,6 +32,7 @@ pub const Candidate = matching.Candidate;
 pub const CheckOptions = fluentapi.CheckOptions;
 pub const Checkable = fluentapi.Checkable;
 pub const CompilationUnitOverride = extraction.CompilationUnitOverride;
+pub const CycleProjectionError = projection.CycleProjectionError;
 pub const ExtractionOptions = extraction.ExtractionOptions;
 pub const Filter = matching.Filter;
 pub const MatchingMode = matching.MatchingMode;

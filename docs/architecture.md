@@ -162,6 +162,17 @@ cache wraps the same implementation in an atomic mutex, owns storage with `page_
 invalidated by thread-safe `clearGraphCache`. `CheckOptions.clear_cache` is an operation control, not
 an extraction input, so it does not participate in cache identity.
 
+Projection is a pure allocator-backed layer over `Graph`. A `MapFunction` borrows an optional typed
+context and returns borrowed `MappedEdge` labels or null to drop a raw edge. `projectEdges` immediately
+clones valid non-empty labels and raw `Edge` evidence, aggregates equal label pairs, and sorts pairs
+and evidence. The resulting values remain valid after the source graph and mapper context are gone.
+
+`projectToNodes` deep-clones its evidence as well. Raw self-edges retain isolated nodes but do not
+appear as incoming or outgoing dependencies. External targets are omitted by default, while their
+source's outgoing evidence stays visible; opting in creates the external target node and incoming
+evidence. Owned `ProjectedCycle` values require a closed ordered edge path. Issue #18 supplies cycle
+discovery over these values; the ownership model does not depend on a particular algorithm.
+
 ## Rules and reports
 
 The first user-facing release prioritises file rules, named layers, and graph reports. Slices follow
