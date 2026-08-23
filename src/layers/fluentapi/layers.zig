@@ -141,7 +141,8 @@ pub const LayeredArchitecture = struct {
             if (!self.hasSourcePolicy(definition.name)) continue;
             var matched_count: usize = 0;
             for (nodes.items()) |node| {
-                if (try definition.matches(options.allocator, node.label)) matched_count += 1;
+                const assigned = try self.assignedLayerName(options.allocator, node.label);
+                if (assigned != null and std.mem.eql(u8, assigned.?, definition.name)) matched_count += 1;
             }
             var evidence: std.ArrayList(assertion.ScopePattern) = .empty;
             defer evidence.deinit(options.allocator);
@@ -192,6 +193,17 @@ pub const LayeredArchitecture = struct {
             if (std.mem.eql(u8, policy.source_layer, name)) return true;
         }
         return false;
+    }
+
+    fn assignedLayerName(
+        self: *const LayeredArchitecture,
+        allocator: Allocator,
+        path: []const u8,
+    ) Allocator.Error!?[]const u8 {
+        for (self.definitions.items) |*definition| {
+            if (try definition.matches(allocator, path)) return definition.name;
+        }
+        return null;
     }
 };
 
@@ -432,6 +444,31 @@ test "only empty policy-source layers use the shared guard" {
     var allowed = try policy.checkGraph(options, &graph);
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expect(allowed.passes());
+}
+
+test "empty guards count first-precedence assignments rather than overlapping selector matches" {
+    var base = try projectLayers(std.testing.allocator, .{});
+    defer base.deinit(std.testing.allocator);
+    var broad_stage = try base.layer("application");
+    defer broad_stage.deinit();
+    var broad = try broad_stage.definedBy(.{ .glob = "src/**" });
+    defer broad.deinit(std.testing.allocator);
+    var specific_stage = try broad.layer("services");
+    defer specific_stage.deinit();
+    var specific = try specific_stage.definedByFolder(.{ .glob = "src/services" });
+    defer specific.deinit(std.testing.allocator);
+    var policy_stage = try specific.whereLayer("services");
+    defer policy_stage.deinit();
+    var policy = try policy_stage.mayOnlyDependOnLayers(&.{});
+    defer policy.deinit(std.testing.allocator);
+    var graph: Graph = .{};
+    defer graph.deinit(std.testing.allocator);
+    try graphEdge(std.testing.allocator, &graph, "src/services/orders.zig", "src/services/orders.zig");
+
+    var result = try policy.checkGraph(CheckOptions.init(std.testing.allocator, std.testing.io), &graph);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, result.items()[0].kind());
 }
 
 test "layered architecture moves into Checkable with its description and owner allocator" {
