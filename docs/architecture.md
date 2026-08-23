@@ -282,6 +282,25 @@ duplicate the source buffer. Unlike graph-dependent rules, this terminal enumera
 files directly so malformed or binary `.zig` bytes can still be governed. Valid Zig syntax supplies
 AST facts; malformed bytes and ZON files expose `null` declaration facts rather than invented data.
 
+`projectLayers`/`layers` builds one lazy named-layer policy over the normalized internal file graph.
+`layer(name).definedBy(...)` selects complete paths and `definedByFolder(...)` selects directories;
+glob matching is exact and regex matching partial. Layer names are unique. When definitions overlap,
+the first declaration owns the file deterministically, including for empty-source checks. Every
+transition deep-clones owned definitions, compiled filters, policies, and the optional locator, so
+builders are branchable and construction performs no extraction.
+
+`whereLayer(name).mayOnlyDependOnLayers(...)` creates an allowlist; an empty list seals the source
+layer. `mayNotDependOnLayers(...)` creates a non-empty blocklist, and blocklists are evaluated before
+allowlists so one edge produces at most one violation. Intra-layer edges always pass. Unassigned
+internal endpoints are ignored by default or become structured `unassigned_endpoint` disagreements
+under `strict_unassigned_dependencies`; external edges never participate. Resolved Zig module aliases
+and `root` mappings are ordinary internal edges and retain their import kinds and locations.
+
+Only a layer used as a policy source invokes the shared empty-test guard. The guard counts effective
+first-precedence assignments rather than raw selector matches. A layer dependency violation owns its
+projected edge, optional source/target assignments, and policy kind; rendering remains exclusively in
+the testing layer.
+
 Every terminal applies one shared empty-test guard to its subject selection. Zero subjects produce
 one `empty_test` violation by default, including under negation; `allow_empty_tests` returns an empty
 result instead. Direct file-dependency rules also guard a zero-match object scope in both moods,
