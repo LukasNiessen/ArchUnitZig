@@ -6,9 +6,11 @@ const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
 const projection = @import("../../common/projection.zig");
+const custom_assertion = @import("../assertion/custom_file_condition.zig");
 const matching_files = @import("../assertion/matching_files.zig");
 const dependency_assertion = @import("../assertion/depend_on_files.zig");
 const external_assertion = @import("../assertion/depend_on_external_modules.zig");
+const file_info_extraction = @import("../extraction/file_info.zig");
 const file_cycles = @import("../projection/file_cycles.zig");
 
 const Allocator = std.mem.Allocator;
@@ -19,9 +21,11 @@ pub const Pattern = matching.Pattern;
 pub const PatternTarget = matching.PatternTarget;
 pub const ScopePattern = assertion.ScopePattern;
 pub const CheckOptions = fluentapi.CheckOptions;
+pub const CustomFilePredicate = custom_assertion.CustomFilePredicate;
 pub const ExternalModuleCategories = external_assertion.ExternalModuleCategories;
 
 pub const BuilderError = Allocator.Error || error{
+    InvalidDescription,
     InvalidPattern,
     InvalidProjectPath,
 };
@@ -533,6 +537,14 @@ pub const FilesShould = struct {
             .categories = external_assertion.defaultExternalModuleCategories(),
         };
     }
+
+    pub fn adhereTo(
+        self: *const FilesShould,
+        predicate: CustomFilePredicate,
+        policy_description: []const u8,
+    ) BuilderError!FilesAdhereTo {
+        return FilesAdhereTo.init(&self.rule, predicate, policy_description);
+    }
 };
 
 /// Positive terminal rule for elementary cycles in the selected internal file graph.
@@ -1021,6 +1033,101 @@ pub const FilesExternalModules = struct {
     }
 };
 
+/// Terminal escape hatch for a project-specific policy over borrowed, byte-safe file information.
+pub const FilesAdhereTo = struct {
+    rule: FileRuleContext,
+    predicate: CustomFilePredicate,
+    owned_description: []const u8,
+
+    fn init(
+        source_rule: *const FileRuleContext,
+        predicate: CustomFilePredicate,
+        policy_description: []const u8,
+    ) BuilderError!FilesAdhereTo {
+        if (!containsNonWhitespace(policy_description)) return error.InvalidDescription;
+        var result = FilesAdhereTo{
+            .rule = try source_rule.clone(),
+            .predicate = predicate,
+            .owned_description = undefined,
+        };
+        errdefer result.rule.deinit();
+        result.owned_description = try source_rule.scope.allocator.dupe(u8, policy_description);
+        return result;
+    }
+
+    pub fn deinit(self: *FilesAdhereTo, allocator: Allocator) void {
+        _ = allocator;
+        const owner = self.rule.scope.allocator;
+        owner.free(self.owned_description);
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const FilesAdhereTo, allocator: Allocator) Allocator.Error![]u8 {
+        const prefix = try self.rule.description(allocator);
+        defer allocator.free(prefix);
+        return std.fmt.allocPrint(
+            allocator,
+            "{s} adhere to \"{f}\"",
+            .{ prefix, std.zig.fmtString(self.owned_description) },
+        );
+    }
+
+    pub fn check(self: *const FilesAdhereTo, options: CheckOptions) anyerror!assertion.ViolationList {
+        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        defer diagnostics.deinit();
+        var project = try extraction.locateProject(
+            options.allocator,
+            options.io,
+            self.rule.scope.projectLocator(),
+            options.working_directory,
+            &diagnostics,
+        );
+        defer project.deinit(options.allocator);
+        var source_files = try extraction.enumerateSourceFiles(
+            options.allocator,
+            options.io,
+            project.path,
+            .{ .exclusions = options.extraction.exclusions },
+            &diagnostics,
+        );
+        defer source_files.deinit(options.allocator);
+
+        var selected_count: usize = 0;
+        for (source_files.items()) |path| {
+            if (try self.rule.scope.matchesPath(path)) selected_count += 1;
+        }
+        if (selected_count == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelection(&self.rule, options.allocator, "files.adhere_to");
+        }
+
+        var result = assertion.ViolationList{};
+        errdefer result.deinit(options.allocator);
+        for (source_files.items()) |path| {
+            if (!try self.rule.scope.matchesPath(path)) continue;
+            var loaded = try file_info_extraction.loadFileInfo(
+                options.allocator,
+                options.io,
+                project.path,
+                path,
+                &diagnostics,
+            );
+            defer loaded.deinit(options.allocator);
+            var current = try custom_assertion.gatherCustomFileViolations(
+                options.allocator,
+                &.{loaded.view},
+                self.predicate,
+                self.owned_description,
+                self.rule.mood(),
+            );
+            defer current.deinit(options.allocator);
+            try result.appendListMove(options.allocator, &current);
+        }
+        return result;
+    }
+};
+
 /// Negated mood stage. It is deliberately one mood flag over the same context and assertions.
 pub const FilesShouldNot = struct {
     rule: FileRuleContext,
@@ -1072,6 +1179,14 @@ pub const FilesShouldNot = struct {
             .categories = external_assertion.defaultExternalModuleCategories(),
         };
     }
+
+    pub fn adhereTo(
+        self: *const FilesShouldNot,
+        predicate: CustomFilePredicate,
+        policy_description: []const u8,
+    ) BuilderError!FilesAdhereTo {
+        return FilesAdhereTo.init(&self.rule, predicate, policy_description);
+    }
 };
 
 pub fn projectFiles(allocator: Allocator, options: ProjectOptions) BuilderError!FilesScope {
@@ -1091,6 +1206,10 @@ fn matchingModeFor(pattern: Pattern) matching.MatchingMode {
         .glob => .exact,
         .regex => .partial,
     };
+}
+
+fn containsNonWhitespace(value: []const u8) bool {
+    return std.mem.trim(u8, value, " \t\r\n\x0b\x0c").len != 0;
 }
 
 fn extractRuleGraph(rule: *const FileRuleContext, options: CheckOptions) anyerror!Graph {
@@ -2175,6 +2294,164 @@ test "external module terminal cleans up every allocation failure" {
         exerciseExternalTerminalAllocationFailures,
         .{},
     );
+}
+
+fn handlerHasExpectedFileInfo(allocator: Allocator, info: file_info_extraction.FileInfo) !bool {
+    const copied_path = try allocator.dupe(u8, info.path);
+    defer allocator.free(copied_path);
+    return std.mem.eql(u8, copied_path, "src/api/handler.zig") and
+        std.mem.eql(u8, info.stem, "handler") and
+        std.mem.eql(u8, info.extension, ".zig") and
+        std.mem.eql(u8, info.directory, "src/api") and
+        info.source_bytes.len != 0 and
+        info.non_blank_line_count == 4 and
+        info.imports.total == 1 and
+        info.imports.count(.zig_file) == 1 and
+        info.top_level_declarations.?.functions == 1 and
+        info.top_level_declarations.?.variables == 1;
+}
+
+fn alwaysAcceptFile(_: Allocator, _: file_info_extraction.FileInfo) !bool {
+    return true;
+}
+
+fn predicateCheckFailure(_: Allocator, _: file_info_extraction.FileInfo) !bool {
+    return error.ProjectSpecificAnalysisFailed;
+}
+
+fn acceptInvalidAndEmpty(info_allocator: Allocator, info: file_info_extraction.FileInfo) !bool {
+    _ = info_allocator;
+    if (std.mem.eql(u8, info.stem, "legacy")) {
+        return info.source_bytes.len == 2 and
+            info.source_bytes[0] == 0xff and
+            info.non_blank_line_count == 1 and
+            info.imports.total == 0 and
+            info.top_level_declarations == null;
+    }
+    if (std.mem.eql(u8, info.stem, "empty")) {
+        return info.source_bytes.len == 0 and
+            info.non_blank_line_count == 0 and
+            info.top_level_declarations.?.total == 0;
+    }
+    return false;
+}
+
+test "adhereTo grammar owns its description and exists in both moods" {
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var positive = try entry.should();
+    defer positive.deinit();
+    var negative = try entry.shouldNot();
+    defer negative.deinit();
+    var mutable_description = [_]u8{ 'f', 'i', 'l', 'e', 's', ' ', 's', 't', 'a', 'y', ' ', 's', 'm', 'a', 'l', 'l' };
+    var terminal = try positive.adhereTo(alwaysAcceptFile, &mutable_description);
+    defer terminal.deinit(std.testing.allocator);
+    @memset(&mutable_description, 'x');
+    const rendered = try terminal.description(std.testing.allocator);
+    defer std.testing.allocator.free(rendered);
+
+    try std.testing.expectEqualStrings(
+        "project files, should adhere to \"files stay small\"",
+        rendered,
+    );
+    try std.testing.expect(@hasDecl(FilesShould, "adhereTo"));
+    try std.testing.expect(@hasDecl(FilesShouldNot, "adhereTo"));
+    try std.testing.expectError(
+        error.InvalidDescription,
+        negative.adhereTo(alwaysAcceptFile, " \n\t"),
+    );
+}
+
+test "adhereTo checks a selected real Zig file and moves through Checkable" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var handler = try entry.inFile(&.{"src/api/handler.zig"});
+    defer handler.deinit();
+    var positive = try handler.should();
+    defer positive.deinit();
+    var terminal = try positive.adhereTo(
+        handlerHasExpectedFileInfo,
+        "handler metadata stays stable",
+    );
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    var result = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+
+    var negative = try handler.shouldNot();
+    defer negative.deinit();
+    var rejected = try negative.adhereTo(alwaysAcceptFile, "handler must not match");
+    defer rejected.deinit(std.testing.allocator);
+    var negative_result = try rejected.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer negative_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), negative_result.items().len);
+    const violation = negative_result.items()[0].custom_file;
+    try std.testing.expectEqualStrings("src/api/handler.zig", violation.source_path);
+    try std.testing.expectEqualStrings("handler must not match", violation.description);
+    try std.testing.expectEqual(Mood.should_not, violation.mood);
+    try std.testing.expectEqual(@as(usize, 1), violation.imports.total);
+    try std.testing.expectEqual(@as(usize, 1), violation.top_level_declarations.?.functions);
+}
+
+test "adhereTo propagates callback errors instead of manufacturing violations" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var handler = try entry.inFile(&.{"src/api/handler.zig"});
+    defer handler.deinit();
+    var positive = try handler.should();
+    defer positive.deinit();
+    var terminal = try positive.adhereTo(predicateCheckFailure, "callback succeeds");
+    defer terminal.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.ProjectSpecificAnalysisFailed,
+        terminal.check(CheckOptions.init(std.testing.allocator, std.testing.io)),
+    );
+}
+
+test "adhereTo guards empty subjects before invoking the callback" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var missing = try entry.inFolder(&.{.{ .glob = "missing" }});
+    defer missing.deinit();
+    var positive = try missing.should();
+    defer positive.deinit();
+    var terminal = try positive.adhereTo(predicateCheckFailure, "callback succeeds");
+    defer terminal.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    var rejected = try terminal.check(options);
+    defer rejected.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("files.adhere_to", rejected.items()[0].empty_test.rule_id);
+
+    options.allow_empty_tests = true;
+    var allowed = try terminal.check(options);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+test "adhereTo presents invalid UTF-8 and empty sources as byte-safe views" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "src");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "build.zig.zon", .data = ".{ .name = .custom_fixture }" });
+    const invalid = [_]u8{ 0xff, '\n' };
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/legacy.zig", .data = &invalid });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/empty.zig", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = root });
+    defer entry.deinit();
+    var source = try entry.inFolder(&.{.{ .glob = "src" }});
+    defer source.deinit();
+    var positive = try source.should();
+    defer positive.deinit();
+    var terminal = try positive.adhereTo(acceptInvalidAndEmpty, "raw sources stay inspectable");
+    defer terminal.deinit(std.testing.allocator);
+    var result = try terminal.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
 }
 
 fn checkCycleFixture(locator: []const u8) !assertion.ViolationList {

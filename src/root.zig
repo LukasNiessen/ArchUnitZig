@@ -39,6 +39,7 @@ pub const FilesDependOnBuilder = file_rules.FilesDependOnBuilder;
 pub const FilesDependOn = file_rules.FilesDependOn;
 pub const FilesExternalModuleBuilder = file_rules.FilesExternalModuleBuilder;
 pub const FilesExternalModules = file_rules.FilesExternalModules;
+pub const FilesAdhereTo = file_rules.FilesAdhereTo;
 pub const FilesShould = file_rules.FilesShould;
 pub const FilesShouldNot = file_rules.FilesShouldNot;
 pub const Graph = extraction.Graph;

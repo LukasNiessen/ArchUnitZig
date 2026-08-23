@@ -6,6 +6,7 @@ pub const FilesDependOnBuilder = @import("files/fluentapi/files.zig").FilesDepen
 pub const FilesDependOn = @import("files/fluentapi/files.zig").FilesDependOn;
 pub const FilesExternalModuleBuilder = @import("files/fluentapi/files.zig").FilesExternalModuleBuilder;
 pub const FilesExternalModules = @import("files/fluentapi/files.zig").FilesExternalModules;
+pub const FilesAdhereTo = @import("files/fluentapi/files.zig").FilesAdhereTo;
 pub const FilesShould = @import("files/fluentapi/files.zig").FilesShould;
 pub const FilesShouldNot = @import("files/fluentapi/files.zig").FilesShouldNot;
 pub const ProjectOptions = @import("files/fluentapi/files.zig").ProjectOptions;
