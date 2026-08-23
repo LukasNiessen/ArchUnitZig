@@ -242,6 +242,21 @@ blocklist within the enabled categories. A local module mapping is internal and 
 for an external-module violation. External violations group owned projected edges by source and keep
 target class, availability, import kind, and source locations.
 
+`adhereTo(predicate, description)` is the Zig escape hatch in both moods. Its callback signature is
+`fn (std.mem.Allocator, FileInfo) anyerror!bool`: returning a boolean participates in the same
+`Mood.holds` logic as built-in predicates, while returning an error aborts the check unchanged as an
+analysis failure. `FileInfo` exposes project-relative path, stem, dot-prefixed extension, directory,
+raw source bytes, non-blank byte-line count, per-kind import counts/set, and optional AST-derived
+root declaration counts. Source bytes need not be UTF-8.
+
+The terminal reads one selected source at a time. Every slice in `FileInfo` is borrowed and valid
+only until that predicate call returns; callbacks must not retain it. The supplied allocator is the
+check allocator and may be used for temporary work under normal Zig ownership rules. A custom-file
+violation owns the path, policy description, mood, and scalar summaries, but deliberately does not
+duplicate the source buffer. Unlike graph-dependent rules, this terminal enumerates the selected
+files directly so malformed or binary `.zig` bytes can still be governed. Valid Zig syntax supplies
+AST facts; malformed bytes and ZON files expose `null` declaration facts rather than invented data.
+
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
 `std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging
 configuration, and the centralized extraction options. Their slices are borrowed only for the call;
