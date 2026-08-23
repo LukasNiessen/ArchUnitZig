@@ -16,6 +16,7 @@ pub const Checkable = struct {
 
     const VTable = struct {
         check: *const fn (context: *anyopaque, options: CheckOptions) anyerror!ViolationList,
+        description: *const fn (context: *anyopaque, allocator: Allocator) Allocator.Error![]u8,
         deinit: *const fn (context: *anyopaque, allocator: Allocator) void,
     };
 
@@ -26,6 +27,9 @@ pub const Checkable = struct {
         comptime {
             if (!@hasDecl(Rule, "check")) {
                 @compileError("a Checkable rule must declare check(self, CheckOptions)");
+            }
+            if (!@hasDecl(Rule, "description")) {
+                @compileError("a Checkable rule must declare description(self, Allocator)");
             }
         }
 
@@ -44,6 +48,11 @@ pub const Checkable = struct {
         return self.vtable.check(self.context, options);
     }
 
+    /// Returns an independently owned rule sentence allocated by `allocator`.
+    pub fn description(self: *const Checkable, allocator: Allocator) Allocator.Error![]u8 {
+        return self.vtable.description(self.context, allocator);
+    }
+
     pub fn deinit(self: *Checkable) void {
         self.vtable.deinit(self.context, self.owner_allocator);
         self.* = undefined;
@@ -53,12 +62,18 @@ pub const Checkable = struct {
         return struct {
             const vtable = VTable{
                 .check = checkErased,
+                .description = descriptionErased,
                 .deinit = deinitErased,
             };
 
             fn checkErased(context: *anyopaque, options: CheckOptions) anyerror!ViolationList {
                 const typed: *Rule = @ptrCast(@alignCast(context));
                 return typed.check(options);
+            }
+
+            fn descriptionErased(context: *anyopaque, allocator: Allocator) Allocator.Error![]u8 {
+                const typed: *const Rule = @ptrCast(@alignCast(context));
+                return typed.description(allocator);
             }
 
             fn deinitErased(context: *anyopaque, allocator: Allocator) void {
@@ -113,6 +128,15 @@ fn TestRule(comptime behavior: TestBehavior) type {
             return result;
         }
 
+        pub fn description(self: *const @This(), allocator: Allocator) Allocator.Error![]u8 {
+            _ = self;
+            return allocator.dupe(u8, switch (behavior) {
+                .pass => "mock passing rule",
+                .violate => "mock violating rule",
+                .fail => "mock failing rule",
+            });
+        }
+
         pub fn deinit(self: *@This(), allocator: Allocator) void {
             _ = allocator;
             self.deinits.* += 1;
@@ -160,7 +184,10 @@ test "owned checkable invalidates source and releases boxed rule" {
         return err;
     };
     defer result.deinit(std.testing.allocator);
+    const description = try erased.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
     try std.testing.expect(result.passes());
+    try std.testing.expectEqualStrings("mock passing rule", description);
     erased.deinit();
     erased_is_owned = false;
     try std.testing.expectEqual(@as(usize, 1), deinits);
