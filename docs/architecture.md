@@ -234,6 +234,14 @@ vtable preserves an owned-description operation as well as `check`, so violation
 rules retain the correct sentence in one sorted report. Handles remain caller-owned, checks run in
 order, and the first analysis error discards all partial violation and description storage.
 
+Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
+identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
+Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and
+their selected edges; equal mapped pairs aggregate counts plus import-kind, target-class, and
+availability sets. The final snapshot owns a title, sorted stable-id nodes, sorted label-based edges,
+and summary counts. DOT, Mermaid, D2, CSV, JSON, and HTML rendering must consume that value without
+performing extraction or querying again.
+
 The `empty_test` tag records a stable machine `rule_id`, negation, and scope-pattern
 facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
 patterns within one selector and AND across selector calls, so the testing layer can explain a

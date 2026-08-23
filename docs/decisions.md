@@ -629,3 +629,43 @@ handle it exhaustively.
 Consequence: layers remain a readable convenience over proven file semantics, overlap and strictness
 are reviewable choices, module aliases cannot bypass policies, and layer reports retain concrete Zig
 import evidence without duplicating extraction logic.
+
+### D034 — Graph reports share one owned deterministic snapshot
+
+Graph rendering begins only after a pure `Graph`-to-`GraphReportSnapshot` pipeline has filtered,
+selected, collapsed, aggregated, sorted, and counted the dependency model. Renderers receive no
+extractor or query options and issue #31 must make every format consume this same value. Snapshot
+titles, node ids and labels, edge labels, and collections are deeply owned and cloneable. Nodes sort
+by label and receive `n0`, `n1`, and subsequent stable ids; edges sort by source label then target
+label.
+
+External and self dependencies are independently opt-in. Removing self edges never removes isolated
+internal files because normalized self edges establish the node universe before report-edge
+filtering. Focus is undirected breadth-first traversal with an explicit depth; reachable and
+dependent queries are outgoing and incoming transitive closures. Several query modifiers union
+their selected node sets, and the absence of modifiers selects every eligible node. All matching
+uses normalized project-relative paths and the shared glob/regex semantics.
+
+Selection precedes collapse. Folder collapse retains the first positive number of directory
+segments and leaves root files unchanged. Pattern collapse is a compiled global regular-expression
+replacement: `$0` through `$9` expand existing captures, unmatched optional captures expand to
+empty, and `$$` emits a dollar. Invalid capture references fail before snapshot work. Collapsed
+self-edges are omitted unless self dependencies were requested.
+
+The normalized Zig graph already has at most one edge for a `(source, target)` pair, because parallel
+imports union evidence during extraction. `raw_edge_count` therefore counts selected normalized
+edges before collapse, not source occurrences. An aggregated report edge's `count` records how many
+of those normalized edges collapsed onto its pair. Aggregation unions import kinds, target classes,
+and target availabilities and preserves whether any contributor was external. This keeps compiler,
+resource, C-header, resolution, and import-kind facts available to every future renderer.
+
+`projectGraph` and `dependencyGraph` own their locator and every query string. Each modifier clones
+state and returns an independent builder. Construction performs validation but no filesystem I/O;
+the terminal `snapshot(CheckOptions)` call performs extraction so working-directory, cache, module,
+strictness, resource, and C-header choices retain the existing borrowed per-call lifetime. The
+snapshot allocates from the check allocator and remains valid after the builder, graph, and cache
+are destroyed.
+
+Consequence: all output formats will agree on graph content and summary counts, graph queries remain
+portable and branchable in ordinary Zig tests, collapse cannot erase Zig-specific classification
+evidence, and renderer work cannot accidentally rerun or reinterpret extraction.
