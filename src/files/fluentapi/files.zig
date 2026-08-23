@@ -1930,6 +1930,23 @@ test "dependency rules guard missing subject and object selections separately" {
     var allowed = try object_terminal.checkGraph(options, &graph);
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expect(allowed.passes());
+
+    var positive = try api.should();
+    defer positive.deinit();
+    var positive_object_builder = try positive.dependOnFiles();
+    defer positive_object_builder.deinit();
+    var positive_object = try positive_object_builder.inFolder(&.{.{ .glob = "missing" }});
+    defer positive_object.deinit(std.testing.allocator);
+    var positive_object_result = try positive_object.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer positive_object_result.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_files.object",
+        positive_object_result.items()[0].empty_test.rule_id,
+    );
+    try std.testing.expect(!positive_object_result.items()[0].empty_test.is_negated);
 }
 
 test "API to database fixture resolves module aliases and ZON objects with locations" {
@@ -2160,6 +2177,14 @@ test "negative external absence passes while positive zero-candidate rules stay 
         assertion.Violation.Kind.external_module_dependency,
         positive_miss_result.items()[0].kind(),
     );
+    var allow_empty_options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    allow_empty_options.allow_empty_tests = true;
+    var positive_miss_allowed = try positive_miss.checkGraph(allow_empty_options, &graph);
+    defer positive_miss_allowed.deinit(std.testing.allocator);
+    try std.testing.expectEqual(
+        assertion.Violation.Kind.external_module_dependency,
+        positive_miss_allowed.items()[0].kind(),
+    );
 
     var no_external: Graph = .{};
     defer no_external.deinit(std.testing.allocator);
@@ -2179,6 +2204,15 @@ test "negative external absence passes while positive zero-candidate rules stay 
         "files.depend_on_external_modules.object",
         positive_empty.items()[0].empty_test.rule_id,
     );
+    var positive_empty_allowed = try positive_miss.checkGraph(allow_empty_options, &no_external);
+    defer positive_empty_allowed.deinit(std.testing.allocator);
+    try std.testing.expect(positive_empty_allowed.passes());
+    var negative_empty = try terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &no_external,
+    );
+    defer negative_empty.deinit(std.testing.allocator);
+    try std.testing.expect(negative_empty.passes());
 
     var entry = try projectFiles(std.testing.allocator, .{});
     defer entry.deinit();
