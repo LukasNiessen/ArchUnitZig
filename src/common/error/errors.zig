@@ -89,6 +89,7 @@ test "user and technical error sets are distinguishable" {
 
     try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.InvalidPattern).?);
     try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.UnknownLayer).?);
+    try std.testing.expectEqual(ErrorCategory.user, categoryOf(error.InvalidIgnoreDirective).?);
     try std.testing.expectEqual(ErrorCategory.technical, categoryOf(error.FileSystemFailure).?);
     try std.testing.expectEqual(ErrorCategory.technical, categoryOf(error.ParserFailure).?);
     try std.testing.expectEqual(@as(?ErrorCategory, null), categoryOf(error.AccessDenied));

@@ -108,6 +108,13 @@ returns owned syntax diagnostics instead; a file rejected by the AST contributes
 This policy preserves deterministic whole-file analysis while allowing callers such as editors to
 continue across broken files.
 
+An ordinary line comment may suppress intentional dependency occurrences with `// archunit: ignore`.
+A trailing directive applies to literal dependency calls spanning that line; a standalone directive
+applies only to a builtin beginning on the immediately following physical line. Optional targets are
+comma/whitespace separated and compare exactly after Zig string-literal decoding. Directive comments
+are found only in tokenizer gaps, so doc comments, strings, and multiline strings are not annotations.
+Malformed intended directives are located user errors rather than silently changing graph output.
+
 Relative `.zig`, `.zon`, and embedded-file paths resolve from the importing file. The resolver
 collapses `.` and `..` segments using project-relative `/` identifiers before filesystem access.
 Existing targets are canonicalised against the canonical project root, which also catches paths

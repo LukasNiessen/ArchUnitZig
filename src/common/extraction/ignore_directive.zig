@@ -73,11 +73,12 @@ pub fn parseIgnoreDirectives(
 
     var line_start: usize = 0;
     var line_number: usize = 1;
+    var token_cursor: usize = 0;
     while (line_start < source.len) : (line_number += 1) {
         const newline = std.mem.indexOfScalarPos(u8, source, line_start, '\n') orelse source.len;
         const content_end = if (newline > line_start and source[newline - 1] == '\r') newline - 1 else newline;
         const line = source[line_start..content_end];
-        if (ordinaryCommentStart(tree, line, line_start)) |comment_start| {
+        if (ordinaryCommentStart(tree, line, line_start, &token_cursor)) |comment_start| {
             const body_start = comment_start - line_start + 2;
             const body = trimWhitespace(line[body_start..]);
             const parsed = parseComment(allocator, body, .{
@@ -164,23 +165,29 @@ fn looksLikeDirective(body: []const u8) bool {
     return body["archunit".len] == ':' or isWhitespace(body["archunit".len]);
 }
 
-fn ordinaryCommentStart(tree: *const Ast, line: []const u8, line_start: usize) ?usize {
+fn ordinaryCommentStart(
+    tree: *const Ast,
+    line: []const u8,
+    line_start: usize,
+    token_cursor: *usize,
+) ?usize {
     var search_from: usize = 0;
     while (std.mem.indexOfPos(u8, line, search_from, "//")) |relative_start| {
         const absolute_start = line_start + relative_start;
-        if (!insideToken(tree, absolute_start)) return absolute_start;
+        if (!insideToken(tree, absolute_start, token_cursor)) return absolute_start;
         search_from = relative_start + 2;
     }
     return null;
 }
 
-fn insideToken(tree: *const Ast, byte_offset: usize) bool {
-    var index: usize = 0;
-    while (index < tree.tokens.len) : (index += 1) {
-        const token: Ast.TokenIndex = @intCast(index);
+fn insideToken(tree: *const Ast, byte_offset: usize, token_cursor: *usize) bool {
+    while (token_cursor.* < tree.tokens.len) {
+        const token: Ast.TokenIndex = @intCast(token_cursor.*);
         const start = tree.tokenStart(token);
         if (byte_offset < start) return false;
-        if (byte_offset < start + tree.tokenSlice(token).len) return true;
+        const end = start + tree.tokenSlice(token).len;
+        if (byte_offset < end) return true;
+        token_cursor.* += 1;
     }
     return false;
 }
@@ -258,4 +265,18 @@ test "malformed intended directives return located user diagnostics" {
     try std.testing.expectEqualStrings("zig.parse_ignore_directive", context.diagnostic.?.operation);
     try std.testing.expectEqualStrings("src/main.zig:1:3", context.diagnostic.?.subject.?);
     try std.testing.expectEqual(error.MissingDirectiveColon, context.diagnostic.?.cause.?);
+}
+
+test "a trailing comma is a malformed target list" {
+    const source: [:0]const u8 = "// archunit: ignore dep.zig,\nconst dependency = @import(\"dep.zig\");\n";
+    var tree = try Ast.parse(std.testing.allocator, source, .zig);
+    defer tree.deinit(std.testing.allocator);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    try std.testing.expectError(
+        error.InvalidIgnoreDirective,
+        parseIgnoreDirectives(std.testing.allocator, "src/main.zig", source, &tree, &context),
+    );
+    try std.testing.expectEqual(error.MissingTargetAfterComma, context.diagnostic.?.cause.?);
 }

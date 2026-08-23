@@ -260,6 +260,28 @@ Consequence: equal inputs can reuse extraction without mutable aliases, every in
 cache-owned memory, and option growth fails tests until cache identity is consciously updated. An
 instance cache must be externally synchronized when shared; the global helpers provide that boundary.
 
+### D020 — Ignore directives are lexical, local, and exact
+
+ArchUnitZig recognizes only an anchored ordinary line-comment grammar: `// archunit: ignore`, with
+optional targets separated by commas or ASCII whitespace. Comment starts are discovered in gaps
+between Zig AST tokens. This reuses the language tokenizer's knowledge of string, multiline-string,
+and documentation-comment boundaries instead of stripping comments with a second parser.
+
+A trailing directive applies to every literal `@import`, `@embedFile`, or in-`@cImport` `@cInclude`
+whose token span contains that physical line. A standalone comment applies only to a dependency
+builtin beginning on the immediately following line; a blank line breaks the association. Unscoped
+directives suppress all applicable references, while scoped targets compare exactly with the decoded
+literal. They do not use path-prefix matching because an annotation must not hide future siblings by
+surprise.
+
+A comment beginning like an ArchUnit directive but missing the colon, `ignore` keyword, or a target
+after a comma returns the user error `InvalidIgnoreDirective`. Its owned diagnostic subject includes
+the source path, line, and column. Other comments remain ordinary prose.
+
+Consequence: compatibility exceptions stay visible beside the exact source dependency they waive,
+one ignored occurrence cannot erase an unignored occurrence elsewhere, and malformed annotations
+cannot silently weaken architecture checks.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
