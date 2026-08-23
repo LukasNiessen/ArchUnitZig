@@ -79,6 +79,13 @@ compilation-root/module maps and preserves unresolved aliases as visible targets
 for common build declarations may be added when it can report its limits honestly. Running an
 arbitrary project's `build.zig` is never the default because build files are executable code.
 
+Project discovery canonicalises an explicit directory/marker or searches upward for the nearest
+`build.zig.zon`, then `build.zig`. Source enumeration uses Zig 0.16's selective directory walker so
+excluded directories are never opened recursively. Symlink/reparse entries are not followed, and a
+nested marked Zig project is a traversal boundary by default. The owned result contains sorted,
+project-relative `/` paths for lowercase `.zig` and `.zon` files; custom exclusion globs are additive
+to the documented cache, VCS, output, documentation, and dependency defaults.
+
 ## Rules and reports
 
 The first user-facing release prioritises file rules, named layers, and graph reports. Slices follow

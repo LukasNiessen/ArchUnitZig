@@ -127,6 +127,22 @@ Consequence: normal error propagation remains idiomatic and allocation-free unle
 requested. Recording context can itself fail only as `OutOfMemory`. A rule disagreement never enters
 either error set; it remains a `Violation` in the returned list.
 
+### D013 — Marked project and filesystem traversal boundaries
+
+Automatic project discovery walks upward from a canonical working directory. The nearest directory
+with `build.zig.zon` wins, falling back to `build.zig`; no marker is a user error, while an explicit
+directory may intentionally be unmarked. Enumeration never follows symlinks or reparse points and
+does not enter a nested directory containing either Zig project marker unless the caller explicitly
+disables that boundary.
+
+Default directory exclusions cover VCS data, Zig caches/output/package caches, vendored dependencies,
+coverage/distribution output, and documentation/generated trees. Caller patterns are additive and
+retain root-anchored versus basename semantics. Results include lowercase `.zig` and, by default,
+`.zon` files as sorted project-relative `/` paths.
+
+Consequence: one analysis cannot accidentally absorb a sibling package, dependency cache, or link
+cycle. Workspace/nested-package analysis must opt in and preserve package identity in issue #48.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
