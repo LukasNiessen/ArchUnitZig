@@ -12,6 +12,7 @@ const graph_reports = @import("graph.zig");
 const matching = @import("common/matching.zig");
 const layer_rules = @import("layers.zig");
 const projection = @import("common/projection.zig");
+const slice_rules = @import("slices.zig");
 const testing_support = @import("testing.zig");
 
 pub const Edge = extraction.Edge;
@@ -110,6 +111,10 @@ pub const ProjectedEdges = projection.ProjectedEdges;
 pub const ProjectedNode = projection.ProjectedNode;
 pub const ProjectedNodes = projection.ProjectedNodes;
 pub const ProjectionError = projection.ProjectionError;
+pub const SliceLabels = slice_rules.SliceLabels;
+pub const SliceProjection = slice_rules.SliceProjection;
+pub const SliceProjectionError = slice_rules.SliceProjectionError;
+pub const SliceSuffix = slice_rules.SliceSuffix;
 pub const TechnicalCode = common_error.TechnicalCode;
 pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
@@ -186,6 +191,8 @@ pub const selectGraphNodes = graph_reports.selectGraphNodes;
 pub const createGraphSnapshot = graph_reports.createGraphSnapshot;
 pub const dependencyGraph = graph_reports.dependencyGraph;
 pub const projectGraph = graph_reports.projectGraph;
+pub const projectSliceEdges = slice_rules.projectSliceEdges;
+pub const projectSliceLabels = slice_rules.projectSliceLabels;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
@@ -232,5 +239,6 @@ test {
     _ = @import("files.zig");
     _ = @import("graph.zig");
     _ = @import("layers.zig");
+    _ = @import("slices.zig");
     _ = @import("testing.zig");
 }
