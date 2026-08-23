@@ -19,6 +19,7 @@ pub const ErrorContext = common_error.ErrorContext;
 pub const Graph = extraction.Graph;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
+pub const LocatedProject = extraction.LocatedProject;
 pub const Candidate = matching.Candidate;
 pub const CheckOptions = fluentapi.CheckOptions;
 pub const Checkable = fluentapi.Checkable;
@@ -31,6 +32,7 @@ pub const ModuleResolutionOverrides = fluentapi.ModuleResolutionOverrides;
 pub const Pattern = matching.Pattern;
 pub const PatternSyntax = matching.PatternSyntax;
 pub const PatternTarget = matching.PatternTarget;
+pub const ProjectMarker = extraction.ProjectMarker;
 pub const TechnicalCode = common_error.TechnicalCode;
 pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
@@ -43,6 +45,7 @@ pub const matchesAny = matching.matchesAny;
 pub const matchesSelectors = matching.matchesSelectors;
 pub const checkAll = fluentapi.checkAll;
 pub const categoryOfError = common_error.categoryOf;
+pub const locateProject = extraction.locateProject;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
