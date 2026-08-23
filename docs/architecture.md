@@ -46,6 +46,18 @@ Every discovered Zig source file receives a self-edge. Edges with the same `(sou
 merged and union their kinds. Public identifiers are project-relative and separator-normalised to
 `/`, which keeps patterns, diagnostics, cache keys, and golden output portable.
 
+Graph normalization consumes borrowed per-source classified references and returns a fully owned
+graph sorted by normalized source, then target. Every enumerated lowercase `.zig` file receives
+exactly one internal self-edge, including import-free files; enumerated ZON data does not receive a
+synthetic Zig node. Synthetic self-edges start with an empty import-kind set because no source
+expression created them.
+
+Parallel `(source, target)` references must agree on externality. They merge into one edge, union
+their import-kind sets, and retain unique source locations sorted by zero-based byte offset, then
+line and column. Repeated source entries and repeated imports cannot duplicate an edge or location.
+Equal external target names from different sources remain separate pairs. Edge and graph clones own
+independent path and location storage.
+
 ## Pattern matching
 
 `Pattern` distinguishes default glob syntax from the explicit regular-expression escape hatch.

@@ -32,7 +32,7 @@ pub fn normalizeGraph(
                 source.source_path,
                 source.source_path,
                 false,
-                ImportKinds.initOne(.zig_file),
+                ImportKinds.initEmpty(),
             );
         }
         for (source.references) |reference| {
@@ -143,6 +143,20 @@ test "equal external names from different sources remain separate edges" {
     try std.testing.expectEqual(@as(usize, 4), graph.len());
     try std.testing.expect(graph.find("src/a.zig", "dependency") != null);
     try std.testing.expect(graph.find("src/b.zig", "dependency") != null);
+}
+
+test "normalization owns borrowed source and target buffers" {
+    var source_path = [_]u8{ 's', 'r', 'c', '/', 'm', 'a', 'i', 'n', '.', 'z', 'i', 'g' };
+    var target = [_]u8{ 'd', 'e', 'p', 'e', 'n', 'd', 'e', 'n', 'c', 'y' };
+    const location = SourceLocation{ .byte_offset = 5, .line = 1, .column = 6 };
+    const references = [_]ClassifiedReference{makeClassified(&target, .named_module, true, location)};
+    const sources = [_]SourceReferences{.{ .source_path = &source_path, .references = &references }};
+    var graph = try normalizeGraph(std.testing.allocator, &sources);
+    defer graph.deinit(std.testing.allocator);
+    source_path[0] = 'X';
+    target[0] = 'Y';
+    try std.testing.expect(graph.find("src/main.zig", "src/main.zig") != null);
+    try std.testing.expect(graph.find("src/main.zig", "dependency") != null);
 }
 
 fn exerciseAllocationFailures(allocator: Allocator) !void {

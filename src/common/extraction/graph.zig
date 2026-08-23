@@ -157,12 +157,14 @@ test "cloning a graph owns independent edges" {
     var graph: Graph = .{};
     defer graph.deinit(std.testing.allocator);
 
-    try graph.add(
+    const location = edge_module.SourceLocation{ .byte_offset = 8, .line = 1, .column = 9 };
+    try graph.addLocated(
         std.testing.allocator,
         "src/main.zig",
         "std",
         true,
         ImportKinds.initOne(.standard_library),
+        &.{location},
     );
 
     var cloned = try graph.clone(std.testing.allocator);
@@ -172,6 +174,8 @@ test "cloning a graph owns independent edges" {
     try std.testing.expect(graph.items()[0].eql(cloned.items()[0]));
     try std.testing.expect(graph.items()[0].source.ptr != cloned.items()[0].source.ptr);
     try std.testing.expect(graph.items()[0].target.ptr != cloned.items()[0].target.ptr);
+    try std.testing.expectEqual(@as(usize, 1), cloned.items()[0].locationItems().len);
+    try std.testing.expect(graph.items()[0].locationItems().ptr != cloned.items()[0].locationItems().ptr);
 }
 
 fn exerciseAllocationFailures(allocator: Allocator) !void {

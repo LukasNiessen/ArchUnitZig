@@ -222,6 +222,23 @@ Consequence: the sibling-compatible graph can continue to consume `external` and
 while Zig diagnostics and future selectors can distinguish compiler aliases, resources, headers,
 missing paths, and explicit module promotion without reverse engineering a flattened target.
 
+### D018 — Normalized graphs own sorted edges and source locations
+
+The graph invariant is one edge per normalized `(source, target)` pair. Normalization emits one
+internal self-edge for every enumerated lowercase `.zig` source, including import-free files, then
+adds its classified references. Synthetic self-edges begin with no import kinds because they do not
+represent a source expression; a real self-import merges its kind and location normally.
+
+Parallel edges must agree on the compatibility `external` flag. Their `ImportKinds` sets are
+unioned, and owned source locations are sorted by byte offset, line, then column and deduplicated.
+Edges themselves are sorted by normalized source and target after construction. ZON enumeration
+entries do not become synthetic Zig nodes, and equal external names from different sources remain
+distinct because source is part of the key.
+
+Consequence: downstream traversal and rendering are deterministic across enumeration order and host
+separators. Empty files remain observable, diagnostics can point to every distinct import site, and
+callers may release all parser/classifier buffers immediately after normalization.
+
 ## Open decisions
 
 ### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
