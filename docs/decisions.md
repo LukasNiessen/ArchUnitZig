@@ -380,3 +380,30 @@ only in the final mood phrase.
 Consequence: one stored scope can safely produce both moods, each with local `deinit()`, and future
 predicates receive one data flag instead of two code paths. The extra scope clone preserves D010's
 branching and lifetime guarantees at the mood boundary.
+
+### D025 — File cycles use a selected induced graph and retain concrete imports
+
+`projectFiles(...).should().haveNoCycles()` is a positive-only terminal. It selects normalized file
+nodes, then keeps an internal non-self edge only when both endpoints occur in that sorted selection.
+An unselected intermediate file is not contracted into a synthetic selected-to-selected edge. A
+cycle that leaves the selection is therefore outside the rule, while selecting that intermediate
+file makes the complete circuit visible. This is the induced-subgraph behavior of the established
+sibling APIs and avoids topology that never existed in the source.
+
+The terminal composes project location, enumeration, source parsing, reference resolution,
+classification, normalization, and caching through one reusable extractor. `CheckOptions` carries
+explicit Zig `std.Io` and a borrowed working directory because Zig 0.16 intentionally has no hidden
+global I/O interface. Compilation-unit overrides remain explicit and `build.zig` is not executed.
+When exactly one unit exists, every source may use it; with multiple units, only an exact declared
+root is assigned because descendant membership cannot be inferred honestly without build-graph
+data. Other module imports remain visible as unresolved external references.
+
+Every elementary directed circuit produces one owned `cycle` violation. Its path contains ordered
+projected edges, and every projected edge deep-clones the concrete graph edges, import kinds, and
+source locations that support it. Empty selections use the shared `empty_test` violation unless the
+caller opts into vacuous passes. The assertion stores no final sentence; the testing layer may
+format a readable closed path such as `a.zig -> b.zig -> a.zig` from the data.
+
+Consequence: selection boundaries are predictable, external dependencies and normalization
+self-edges cannot create false cycles, results survive graph/cache destruction, and future text or
+machine reporters can choose their own rendering without re-extracting source evidence.

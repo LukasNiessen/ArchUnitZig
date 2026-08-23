@@ -9,29 +9,29 @@ pub const ProjectedCycle = projected_cycle.ProjectedCycle;
 /// Data-only disagreement for one elementary directed cycle. Ordered projected edges retain the
 /// concrete raw imports and source locations needed by testing-layer formatters.
 pub const CycleViolation = struct {
-    cycle: ProjectedCycle,
+    path: ProjectedCycle,
 
     pub fn initClone(allocator: Allocator, source: ProjectedCycle) InitError!CycleViolation {
-        return .{ .cycle = try source.clone(allocator) };
+        return .{ .path = try source.clone(allocator) };
     }
 
     pub fn fromCycleMove(source: *ProjectedCycle) CycleViolation {
-        const result = CycleViolation{ .cycle = source.* };
+        const result = CycleViolation{ .path = source.* };
         source.* = undefined;
         return result;
     }
 
     pub fn clone(self: CycleViolation, allocator: Allocator) InitError!CycleViolation {
-        return initClone(allocator, self.cycle);
+        return initClone(allocator, self.path);
     }
 
     pub fn deinit(self: *CycleViolation, allocator: Allocator) void {
-        self.cycle.deinit(allocator);
+        self.path.deinit(allocator);
         self.* = undefined;
     }
 
     pub fn eql(self: CycleViolation, other: CycleViolation) bool {
-        return self.cycle.eql(other.cycle);
+        return self.path.eql(other.path);
     }
 };
 
@@ -64,8 +64,8 @@ test "cycle violations own ordered raw evidence independently" {
     var violation = try CycleViolation.initClone(std.testing.allocator, cycle);
     defer violation.deinit(std.testing.allocator);
 
-    try std.testing.expect(violation.cycle.eql(cycle));
+    try std.testing.expect(violation.path.eql(cycle));
     try std.testing.expect(cycle.items()[0].evidence()[0].source.ptr !=
-        violation.cycle.items()[0].evidence()[0].source.ptr);
-    try std.testing.expectEqual(@as(u32, 1), violation.cycle.items()[0].evidence()[0].locationItems()[0].line);
+        violation.path.items()[0].evidence()[0].source.ptr);
+    try std.testing.expectEqual(@as(u32, 1), violation.path.items()[0].evidence()[0].locationItems()[0].line);
 }

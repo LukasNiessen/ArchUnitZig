@@ -860,10 +860,10 @@ test "have no cycles passes and fails against real Zig fixture projects" {
     for (failing.items()) |violation| try std.testing.expectEqual(assertion.Violation.Kind.cycle, violation.kind());
 
     const formatCyclePath = @import("../../testing.zig").formatCyclePath;
-    const first_path = try formatCyclePath(std.testing.allocator, failing.items()[0].cycle.cycle);
+    const first_path = try formatCyclePath(std.testing.allocator, failing.items()[0].cycle.path);
     defer std.testing.allocator.free(first_path);
     try std.testing.expectEqualStrings("src/a.zig -> src/b.zig -> src/a.zig", first_path);
-    const first_import = failing.items()[0].cycle.cycle.items()[0].evidence()[0];
+    const first_import = failing.items()[0].cycle.path.items()[0].evidence()[0];
     try std.testing.expectEqualStrings("src/a.zig", first_import.source);
     try std.testing.expectEqualStrings("src/b.zig", first_import.target);
     try std.testing.expectEqual(@as(usize, 1), first_import.locationItems().len);
@@ -908,6 +908,22 @@ test "empty selections fail by default and can be explicitly allowed" {
     var allowed = try terminal.check(options);
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expect(allowed.passes());
+}
+
+test "have no cycles terminal moves safely into a heterogeneous Checkable" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-cycles/pass" });
+    defer entry.deinit();
+    var positive = try entry.should();
+    defer positive.deinit();
+    var terminal = try positive.haveNoCycles();
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try erased.check(options);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.passes());
 }
 
 fn exerciseCycleRuleAllocationFailures(allocator: Allocator) !void {
