@@ -123,6 +123,7 @@ pub const ProjectSlices = slice_rules.ProjectSlices;
 pub const SliceDependencyRule = slice_rules.SliceDependencyRule;
 pub const SlicesShould = slice_rules.SlicesShould;
 pub const SlicesShouldNot = slice_rules.SlicesShouldNot;
+pub const DiagramAdherenceRule = slice_rules.DiagramAdherenceRule;
 pub const PlantUmlDependency = slice_rules.PlantUmlDependency;
 pub const PlantUmlDiagram = slice_rules.PlantUmlDiagram;
 pub const PlantUmlDiagnostic = slice_rules.PlantUmlDiagnostic;

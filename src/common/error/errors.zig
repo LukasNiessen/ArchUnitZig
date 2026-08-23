@@ -12,6 +12,7 @@ pub const UserError = error{
     DuplicateLayerTarget,
     EmptyBlocklist,
     EmptyLayerDefinition,
+    InvalidDiagram,
 };
 
 pub const TechnicalError = error{
@@ -41,6 +42,7 @@ pub const UserCode = enum {
     duplicate_layer_target,
     empty_blocklist,
     empty_layer_definition,
+    invalid_diagram,
 
     pub fn toError(self: UserCode) UserError {
         return switch (self) {
@@ -57,6 +59,7 @@ pub const UserCode = enum {
             .duplicate_layer_target => error.DuplicateLayerTarget,
             .empty_blocklist => error.EmptyBlocklist,
             .empty_layer_definition => error.EmptyLayerDefinition,
+            .invalid_diagram => error.InvalidDiagram,
         };
     }
 };
@@ -96,6 +99,7 @@ pub fn categoryOf(failure: anyerror) ?ErrorCategory {
         error.DuplicateLayerTarget,
         error.EmptyBlocklist,
         error.EmptyLayerDefinition,
+        error.InvalidDiagram,
         => .user,
         error.FileSystemFailure,
         error.OutOfMemory,

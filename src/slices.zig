@@ -17,6 +17,7 @@ pub const ProjectSlices = slice_fluent.ProjectSlices;
 pub const SliceDependencyRule = slice_fluent.SliceDependencyRule;
 pub const SlicesShould = slice_fluent.SlicesShould;
 pub const SlicesShouldNot = slice_fluent.SlicesShouldNot;
+pub const DiagramAdherenceRule = slice_fluent.DiagramAdherenceRule;
 pub const projectSlices = slice_fluent.projectSlices;
 pub const slices = slice_fluent.slices;
 pub const PlantUmlDependency = plantuml.PlantUmlDependency;
