@@ -131,6 +131,7 @@ test "concrete terminal rule remains directly checkable" {
     };
     var result = try rule.check(.{
         .allocator = std.testing.allocator,
+        .io = std.testing.io,
         .allow_empty_tests = true,
     });
     defer result.deinit(std.testing.allocator);
@@ -153,7 +154,7 @@ test "owned checkable invalidates source and releases boxed rule" {
     var erased = try Checkable.fromMove(std.testing.allocator, &rule);
     var erased_is_owned = true;
     defer if (erased_is_owned) erased.deinit();
-    var result = erased.check(CheckOptions.init(std.testing.allocator)) catch |err| {
+    var result = erased.check(CheckOptions.init(std.testing.allocator, std.testing.io)) catch |err| {
         erased.deinit();
         erased_is_owned = false;
         return err;
@@ -194,7 +195,7 @@ test "heterogeneous rules return one clearly-owned violation list" {
     violating = undefined;
     defer for (&rules) |*rule| rule.deinit();
 
-    var result = try checkAll(CheckOptions.init(std.testing.allocator), &rules);
+    var result = try checkAll(CheckOptions.init(std.testing.allocator, std.testing.io), &rules);
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), result.items().len);
     try std.testing.expect(!result.passes());
@@ -231,7 +232,7 @@ test "heterogeneous check stops and propagates rule errors" {
 
     try std.testing.expectError(
         error.MockCheckFailed,
-        checkAll(CheckOptions.init(std.testing.allocator), &rules),
+        checkAll(CheckOptions.init(std.testing.allocator, std.testing.io), &rules),
     );
     try std.testing.expectEqual(@as(usize, 1), failure_checks);
 }
@@ -248,7 +249,7 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     var erased = try Checkable.fromMove(allocator, &rule);
     defer erased.deinit();
 
-    var result = try erased.check(CheckOptions.init(allocator));
+    var result = try erased.check(CheckOptions.init(allocator, std.testing.io));
     defer result.deinit(allocator);
     try std.testing.expect(!result.passes());
 }

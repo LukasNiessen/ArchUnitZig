@@ -205,15 +205,21 @@ shape only when it lands, and the testing formatter must then handle the new tag
 kernel does not render final prose. `ViolationList` is the owned check result: zero items means pass,
 while `appendMove` makes ownership transfer explicit and clone/deinitialisation cover every payload.
 
-The first tag is `empty_test`. It records a stable machine `rule_id`, negation, and scope-pattern
+The `empty_test` tag records a stable machine `rule_id`, negation, and scope-pattern
 facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
 patterns within one selector and AND across selector calls, so the testing layer can explain a
 vacuous rule without retaining builders or compiled regular expressions.
 
-Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry the result
-allocator, empty-test/cache controls, per-check logging configuration, and the centralized extraction
-options. Their slices are borrowed only for the call; every returned `ViolationList` is owned by the
-supplied allocator.
+`projectFiles(...).should().haveNoCycles()` is positive-only and checks the induced internal graph
+of selected files. Both endpoints of an edge must be selected; the rule never contracts a path
+through an unselected file. External and synthetic self-edges cannot form file cycles. Each
+elementary cycle is one `cycle` violation whose ordered path owns projected edges and underlying raw
+imports, including locations. Cycle-path prose belongs to `testing`, not the assertion payload.
+
+Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry explicit
+`std.Io`, the working directory, result allocator, empty-test/cache controls, per-check logging
+configuration, and the centralized extraction options. Their slices are borrowed only for the call;
+every returned `ViolationList` is owned by the supplied allocator.
 
 Heterogeneous rule collections use owned `Checkable` boxes. `fromMove` makes the transfer explicit
 and prevents a stored handle from dangling after a stack rule leaves scope. `checkAll` runs boxes in

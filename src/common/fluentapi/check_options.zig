@@ -4,6 +4,7 @@ const extraction_options = @import("../extraction/extraction_options.zig");
 const module_resolver = @import("../extraction/module_resolver.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 pub const LogLevel = enum {
     disabled,
@@ -30,19 +31,22 @@ pub const ModuleResolutionOverrides = module_resolver.ModuleResolutionOverrides;
 /// from `allocator` and must be released with that same allocator.
 pub const CheckOptions = struct {
     allocator: Allocator,
+    io: Io,
+    working_directory: []const u8 = ".",
     allow_empty_tests: bool = false,
     clear_cache: bool = false,
     logging: LoggingOptions = .{},
     extraction: ExtractionOptions = .{},
 
-    pub fn init(allocator: Allocator) CheckOptions {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: Allocator, io: Io) CheckOptions {
+        return .{ .allocator = allocator, .io = io };
     }
 };
 
 test "check options have safe deterministic defaults" {
-    const options = CheckOptions.init(std.testing.allocator);
+    const options = CheckOptions.init(std.testing.allocator, std.testing.io);
 
+    try std.testing.expectEqualStrings(".", options.working_directory);
     try std.testing.expect(!options.allow_empty_tests);
     try std.testing.expect(!options.clear_cache);
     try std.testing.expectEqual(LogLevel.disabled, options.logging.level);
@@ -65,6 +69,8 @@ test "check options carry borrowed extraction and Zig module context" {
     }};
     const options = CheckOptions{
         .allocator = std.testing.allocator,
+        .io = std.testing.io,
+        .working_directory = "fixture",
         .allow_empty_tests = true,
         .clear_cache = true,
         .logging = .{ .level = .debug, .include_violations = false },
@@ -78,6 +84,7 @@ test "check options carry borrowed extraction and Zig module context" {
     };
 
     try std.testing.expect(options.allow_empty_tests);
+    try std.testing.expectEqualStrings("fixture", options.working_directory);
     try std.testing.expect(options.clear_cache);
     try std.testing.expectEqual(LogLevel.debug, options.logging.level);
     try std.testing.expect(!options.logging.include_violations);

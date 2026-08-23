@@ -59,6 +59,18 @@ pub const ProjectedCycle = struct {
         self.* = undefined;
     }
 
+    pub fn clone(self: ProjectedCycle, allocator: Allocator) CycleProjectionError!ProjectedCycle {
+        return initClone(allocator, self.edges.items);
+    }
+
+    pub fn eql(self: ProjectedCycle, other: ProjectedCycle) bool {
+        if (self.edges.items.len != other.edges.items.len) return false;
+        for (self.edges.items, other.edges.items) |left, right| {
+            if (!left.eql(right)) return false;
+        }
+        return true;
+    }
+
     pub fn items(self: *const ProjectedCycle) []const ProjectedEdge {
         return self.edges.items;
     }

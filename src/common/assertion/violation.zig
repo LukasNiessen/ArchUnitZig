@@ -1,17 +1,26 @@
 const std = @import("std");
 
 const empty_test = @import("empty_test_violation.zig");
+const cycle_violation = @import("cycle_violation.zig");
 
 const Allocator = std.mem.Allocator;
 pub const EmptyTestViolation = empty_test.EmptyTestViolation;
+pub const CycleViolation = cycle_violation.CycleViolation;
 
 /// Closed, data-only architecture disagreement. Formatters exhaustively switch on this union in
 /// the testing layer; rule code never stores its final prose here.
 pub const Violation = union(enum) {
+    cycle: CycleViolation,
     empty_test: EmptyTestViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError;
+
+    pub fn fromCycleMove(payload: *CycleViolation) Violation {
+        const result = Violation{ .cycle = payload.* };
+        payload.* = undefined;
+        return result;
+    }
 
     pub fn fromEmptyTestMove(payload: *EmptyTestViolation) Violation {
         const result = Violation{ .empty_test = payload.* };
@@ -25,12 +34,14 @@ pub const Violation = union(enum) {
 
     pub fn clone(self: Violation, allocator: Allocator) CloneError!Violation {
         return switch (self) {
+            .cycle => |value| .{ .cycle = try value.clone(allocator) },
             .empty_test => |value| .{ .empty_test = try value.clone(allocator) },
         };
     }
 
     pub fn deinit(self: *Violation, allocator: Allocator) void {
         switch (self.*) {
+            .cycle => |*value| value.deinit(allocator),
             .empty_test => |*value| value.deinit(allocator),
         }
         self.* = undefined;
@@ -39,6 +50,7 @@ pub const Violation = union(enum) {
     pub fn eql(self: Violation, other: Violation) bool {
         if (self.kind() != other.kind()) return false;
         return switch (self) {
+            .cycle => |left| left.eql(other.cycle),
             .empty_test => |left| left.eql(other.empty_test),
         };
     }
@@ -46,6 +58,7 @@ pub const Violation = union(enum) {
 
 fn formatterDispatchBoundary(violation: Violation) []const u8 {
     return switch (violation) {
+        .cycle => "format-cycle-in-testing-layer",
         .empty_test => "format-empty-selection-in-testing-layer",
     };
 }

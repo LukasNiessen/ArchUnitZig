@@ -1,0 +1,5 @@
+.{
+    .name = .archunit_fixture_pass,
+    .version = "0.0.0",
+    .fingerprint = 0x38f290bc0465891a,
+}
