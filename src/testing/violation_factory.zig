@@ -765,6 +765,67 @@ test "layer dependency formatter retains assignments policy and import location"
     );
 }
 
+test "layer dependency formatter explains sealed allowlists and strict unassigned endpoints" {
+    var edge = try testProjectedEdge(
+        std.testing.allocator,
+        "src/application/service.zig",
+        "src/support/logger.zig",
+        false,
+        .zig_file,
+        .internal,
+        .resolved,
+        .{ .byte_offset = 44, .line = 2, .column = 16 },
+    );
+    defer edge.deinit(std.testing.allocator);
+
+    var allow_payload = try assertion.LayerDependencyViolation.initClone(
+        std.testing.allocator,
+        edge,
+        "application",
+        "support",
+        .may_only_depend_on_layers,
+    );
+    var allow_violation = assertion.Violation.fromLayerDependencyMove(&allow_payload);
+    defer allow_violation.deinit(std.testing.allocator);
+    var allow_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        allow_violation,
+        "project layers should satisfy named dependency policies",
+    );
+    defer allow_formatted.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        allow_formatted.details,
+        "Reason: layer \"application\" may only depend on its declared allowlist",
+    ) != null);
+
+    var strict_payload = try assertion.LayerDependencyViolation.initClone(
+        std.testing.allocator,
+        edge,
+        "application",
+        null,
+        .unassigned_endpoint,
+    );
+    var strict_violation = assertion.Violation.fromLayerDependencyMove(&strict_payload);
+    defer strict_violation.deinit(std.testing.allocator);
+    var strict_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        strict_violation,
+        "project layers should satisfy named dependency policies",
+    );
+    defer strict_formatted.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "Rule: project layers should satisfy named dependency policies\n" ++
+            "Dependency: src/application/service.zig -> src/support/logger.zig\n" ++
+            "Source layer: application\n" ++
+            "Target layer: <unassigned>\n" ++
+            "Reason: strict layer assignment requires both internal endpoints to belong to a declared layer\n" ++
+            "Imports:\n" ++
+            "  - src/application/service.zig:2:16 -> src/support/logger.zig [zig_file]",
+        strict_formatted.details,
+    );
+}
+
 test "cycle formatter preserves traversal and renders each concrete import" {
     var forward = try testProjectedEdge(
         std.testing.allocator,

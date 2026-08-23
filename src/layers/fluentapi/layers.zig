@@ -369,6 +369,9 @@ test "layer and policy builders are branchable and validate names and references
     defer presentation.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), base.definitionItems().len);
     try std.testing.expectEqual(@as(usize, 1), presentation.definitionItems().len);
+    var alias_entry = try layers(std.testing.allocator, .{});
+    defer alias_entry.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), alias_entry.definitionItems().len);
 
     try std.testing.expectError(error.InvalidLayerName, base.layer(" "));
     try std.testing.expectError(error.DuplicateLayerName, presentation.layer("presentation"));
@@ -384,6 +387,12 @@ test "layer and policy builders are branchable and validate names and references
     defer allowed.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), domain.policyItems().len);
     try std.testing.expectEqual(@as(usize, 1), allowed.policyItems().len);
+    var duplicate_policy_stage = try allowed.whereLayer("presentation");
+    defer duplicate_policy_stage.deinit();
+    try std.testing.expectError(
+        error.DuplicateLayerPolicy,
+        duplicate_policy_stage.mayOnlyDependOnLayers(&.{"domain"}),
+    );
     try std.testing.expectError(error.UnknownLayer, policy_stage.mayOnlyDependOnLayers(&.{"missing"}));
     try std.testing.expectError(error.DuplicateLayerTarget, policy_stage.mayOnlyDependOnLayers(&.{ "domain", "domain" }));
     try std.testing.expectError(error.EmptyBlocklist, policy_stage.mayNotDependOnLayers(&.{}));
