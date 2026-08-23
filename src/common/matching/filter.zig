@@ -69,7 +69,7 @@ fn selectPathTarget(normalized_path: []const u8, target: PatternTarget) []const 
     return switch (target) {
         .filename => if (separator) |index| normalized_path[index + 1 ..] else normalized_path,
         .path => normalized_path,
-        .path_without_filename => if (separator) |index| normalized_path[0..index] else "",
+        .path_without_filename => if (separator) |index| normalized_path[0..index] else ".",
         .declaration_name => unreachable,
     };
 }
@@ -126,6 +126,21 @@ test "filter selects normalized filename path and folder targets" {
     try std.testing.expect(try filename.matches(std.testing.allocator, candidate));
     try std.testing.expect(try path.matches(std.testing.allocator, candidate));
     try std.testing.expect(try folder.matches(std.testing.allocator, candidate));
+}
+
+test "a root-level file has the conventional dot folder" {
+    var folder = try Filter.init(
+        std.testing.allocator,
+        .{ .glob = "." },
+        .path_without_filename,
+        .partial,
+    );
+    defer folder.deinit();
+
+    try std.testing.expect(try folder.matches(
+        std.testing.allocator,
+        .{ .path = "build.zig" },
+    ));
 }
 
 test "declaration target requires and selects a declaration name" {

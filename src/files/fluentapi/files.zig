@@ -23,6 +23,26 @@ pub const ProjectOptions = struct {
     locator: ?[]const u8 = null,
 };
 
+/// Owned selector evidence for empty-test violations and reporting. The allocator passed to
+/// `FilesScope.scopePatterns` must also be passed to `deinit`.
+pub const ScopePatterns = struct {
+    values: std.ArrayList(ScopePattern) = .empty,
+
+    pub fn deinit(self: *ScopePatterns, allocator: Allocator) void {
+        for (self.values.items) |*pattern| pattern.deinit(allocator);
+        self.values.deinit(allocator);
+        self.* = undefined;
+    }
+
+    pub fn items(self: *const ScopePatterns) []const ScopePattern {
+        return self.values.items;
+    }
+
+    pub fn len(self: *const ScopePatterns) usize {
+        return self.values.items.len;
+    }
+};
+
 /// An owned, sorted file selection. Its paths do not borrow the graph passed to `FilesScope.select`.
 pub const SelectedFiles = struct {
     allocator: Allocator,
@@ -238,6 +258,21 @@ pub const FilesScope = struct {
         return self.selectors.items[selector_index].alternatives.items.len;
     }
 
+    /// Returns an independent owned copy of the user-facing selector facts in chain order.
+    pub fn scopePatterns(self: *const FilesScope, allocator: Allocator) Allocator.Error!ScopePatterns {
+        var result: ScopePatterns = .{};
+        errdefer result.deinit(allocator);
+        var pattern_count: usize = 0;
+        for (self.selectors.items) |selector| pattern_count += selector.alternatives.items.len;
+        try result.values.ensureTotalCapacity(allocator, pattern_count);
+        for (self.selectors.items) |selector| {
+            for (selector.alternatives.items) |alternative| {
+                result.values.appendAssumeCapacity(try alternative.evidence.clone(allocator));
+            }
+        }
+        return result;
+    }
+
     /// Narrows by last path segment. Alternatives within this call use OR semantics.
     pub fn withName(self: *const FilesScope, patterns: []const Pattern) BuilderError!FilesScope {
         return self.selectPatterns(patterns, .filename);
@@ -385,10 +420,18 @@ test "filename folder path and exact-file selectors inspect distinct path facts"
     try std.testing.expect(!try named.matchesPath("src/orders/order_repository.zig"));
     try std.testing.expect(try folder.matchesPath("src/orders/services/order.zig"));
     try std.testing.expect(!try folder.matchesPath("test/orders/services/order.zig"));
+    var root_folder = try entry.inFolder(&.{.{ .glob = "." }});
+    defer root_folder.deinit();
+    try std.testing.expect(try root_folder.matchesPath("build.zig"));
+    try std.testing.expect(!try root_folder.matchesPath("src/build.zig"));
     try std.testing.expect(try path.matchesPath("src/orders/order.zig"));
     try std.testing.expect(!try path.matchesPath("src/order.zig"));
     try std.testing.expect(try exact.matchesPath("src/order[legacy].zig"));
     try std.testing.expect(!try exact.matchesPath("src/orderl.zig"));
+    var exact_evidence = try exact.scopePatterns(std.testing.allocator);
+    defer exact_evidence.deinit(std.testing.allocator);
+    try std.testing.expectEqual(matching.PatternSyntax.literal, exact_evidence.items()[0].syntax);
+    try std.testing.expectEqual(matching.MatchingMode.exact, exact_evidence.items()[0].matching);
 }
 
 test "owned scopes branch without mutating or borrowing their base" {
@@ -410,6 +453,26 @@ test "owned scopes branch without mutating or borrowing their base" {
     try std.testing.expect(try services.matchesPath("src/orders/order_service.zig"));
     try std.testing.expect(!try services.matchesPath("src/orders/order_repository.zig"));
     try std.testing.expect(try repositories.matchesPath("src/orders/order_repository.zig"));
+
+    var evidence = try base.scopePatterns(std.testing.allocator);
+    defer evidence.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), evidence.len());
+    try std.testing.expectEqualStrings("src/**", evidence.items()[0].expression);
+}
+
+test "explicit clone remains valid after its source owner is destroyed" {
+    var cloned: FilesScope = undefined;
+    {
+        var entry = try projectFiles(std.testing.allocator, .{ .locator = "fixture" });
+        defer entry.deinit();
+        var source = try entry.inPath(&.{.{ .glob = "src/**" }});
+        defer source.deinit();
+        cloned = try source.clone();
+    }
+    defer cloned.deinit();
+
+    try std.testing.expectEqualStrings("fixture", cloned.projectLocator().?);
+    try std.testing.expect(try cloned.matchesPath("src/domain/order.zig"));
 }
 
 test "invalid locators and selector alternatives are clear user errors" {
@@ -460,22 +523,24 @@ fn graphFromFixture(allocator: Allocator, root: []const u8) !Graph {
 test "full public scope syntax selects files from a real Zig fixture project" {
     const root = try fixtureRoot(std.testing.allocator);
     defer std.testing.allocator.free(root);
-    var graph = try graphFromFixture(std.testing.allocator, root);
-    defer graph.deinit(std.testing.allocator);
-
-    var all_files = try projectFiles(std.testing.allocator, .{ .locator = root });
-    defer all_files.deinit();
-    var domain_files = try all_files.inFolder(&.{.{ .glob = "src/domain" }});
-    defer domain_files.deinit();
-    var domain_sources = try domain_files.withName(&.{
-        .{ .glob = "order.zig" },
-        .{ .glob = "order_test.zig" },
-    });
-    defer domain_sources.deinit();
-    var selected = try domain_sources.select(&graph);
+    var selected: SelectedFiles = undefined;
+    {
+        var graph = try graphFromFixture(std.testing.allocator, root);
+        defer graph.deinit(std.testing.allocator);
+        var all_files = try projectFiles(std.testing.allocator, .{ .locator = root });
+        defer all_files.deinit();
+        var domain_files = try all_files.inFolder(&.{.{ .glob = "src/domain" }});
+        defer domain_files.deinit();
+        var domain_sources = try domain_files.withName(&.{
+            .{ .glob = "order.zig" },
+            .{ .glob = "order_test.zig" },
+        });
+        defer domain_sources.deinit();
+        try std.testing.expectEqualStrings(root, domain_sources.projectLocator().?);
+        selected = try domain_sources.select(&graph);
+    }
     defer selected.deinit();
 
-    try std.testing.expectEqualStrings(root, domain_sources.projectLocator().?);
     try std.testing.expectEqual(@as(usize, 2), selected.len());
     try std.testing.expectEqualStrings("src/domain/order.zig", selected.items()[0]);
     try std.testing.expectEqualStrings("src/domain/order_test.zig", selected.items()[1]);
@@ -503,6 +568,8 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer branch.deinit();
     var selected = try branch.select(&graph);
     defer selected.deinit();
+    var evidence = try branch.scopePatterns(allocator);
+    defer evidence.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 2), selected.len());
 }
 

@@ -296,9 +296,9 @@ dependencies; external target nodes are opt-in without hiding the source's outgo
 All outputs survive destruction of the input graph.
 
 `ProjectedCycle` owns a non-empty closed sequence of cloned projected edges; discontinuous paths are
-rejected. The container lands before its producer so issue #18 can implement Tarjan/Johnson without
-changing ownership or violation evidence. Projection performs no filesystem access and uses only the
-allocator supplied for that call.
+rejected. Iterative Tarjan/Johnson discovery produces these values without changing ownership or
+violation evidence. Projection performs no filesystem access and uses only the allocator supplied
+for that call.
 
 Consequence: file, layer, and slice views can share one projection kernel without dangling graph
 pointers or language-specific relabelling state. Deterministic owned results cost additional edge
@@ -340,10 +340,25 @@ their combined violation evidence without multiplying circuits, and graph depth 
 memory instead of call-stack depth. Elementary-cycle enumeration is inherently exponential in the
 number of circuits, so callers should expect output-sensitive runtime for densely cyclic graphs.
 
-## Open decisions
+### D010 — Fluent scopes are independent allocator-bound values
 
-### D010 — Fluent builder storage ([issue #19](https://github.com/LukasNiessen/ArchUnitZig/issues/19))
+`projectFiles(allocator, options)` and `files` create an owned `FilesScope` and clone its optional
+project locator without accessing the filesystem. Each selector compiles and owns its patterns plus
+presentation-neutral evidence. A selector call is one OR group, while calls in the chain are ANDed.
+`inFile` records literal/exact syntax rather than pretending a path is a glob or regular expression.
 
-Sibling builders are immutable values. Zig needs safe storage for a runtime number of patterns while
-keeping an English-like chain and explicit allocation failure. Prototype arena/context-backed stage
-views, owned persistent nodes, and a deliberately mutable state machine before choosing.
+Every narrowing operation deep-clones the preceding locator and selector groups before appending its
+own group. A base scope and all branches therefore have independent storage, retain the allocator
+that created them, and each require `deinit()`. Plain struct assignment is not an ownership clone;
+`clone()` is the explicit operation when a second owner is needed. Later fluent stages use different
+types so invalid stage order is absent from the method set instead of represented by a runtime enum.
+Builder-stage pattern failures are returned immediately as `InvalidPattern` or `OutOfMemory`.
+
+An arena/context would make chains cheaper but every branch would borrow a less-obvious parent
+lifetime. Reference-counted persistent nodes would reduce copies while adding atomic/non-atomic
+policy and failure complexity. Independent values deliberately pay O(chain length) copying and regex
+compilation per appended selector because architecture rules are short and ownership stays local.
+
+Consequence: stored half-rules can be branched safely, caller pattern/locator buffers can be released
+immediately, and allocation failures unwind one owner at a time. `select(graph)` remains pure; only a
+future terminal `check` may locate and extract the configured project.
