@@ -101,8 +101,8 @@ test "external target nodes are opt in while source evidence remains visible" {
     defer graph.deinit(std.testing.allocator);
     var without_externals = try projectToNodes(std.testing.allocator, &graph, .{});
     defer without_externals.deinit(std.testing.allocator);
-    try std.testing.expect(without_externals.findMutable("std") == null);
-    try std.testing.expectEqual(@as(usize, 2), without_externals.findMutable("src/a.zig").?.outgoingItems().len);
+    try std.testing.expect(without_externals.find("std") == null);
+    try std.testing.expectEqual(@as(usize, 2), without_externals.find("src/a.zig").?.outgoingItems().len);
 
     var with_externals = try projectToNodes(
         std.testing.allocator,
@@ -110,7 +110,7 @@ test "external target nodes are opt in while source evidence remains visible" {
         .{ .include_externals = true },
     );
     defer with_externals.deinit(std.testing.allocator);
-    const external = with_externals.findMutable("std").?;
+    const external = with_externals.find("std").?;
     try std.testing.expectEqual(@as(usize, 1), external.incomingItems().len);
     try std.testing.expect(external.incomingItems()[0].external);
 }

@@ -98,6 +98,18 @@ pub const ProjectedEdges = struct {
         return self.values.items.len;
     }
 
+    pub fn find(
+        self: *const ProjectedEdges,
+        source_label: []const u8,
+        target_label: []const u8,
+    ) ?*const ProjectedEdge {
+        for (self.values.items) |*edge| {
+            if (std.mem.eql(u8, edge.source_label, source_label) and
+                std.mem.eql(u8, edge.target_label, target_label)) return edge;
+        }
+        return null;
+    }
+
     pub fn findMutable(
         self: *ProjectedEdges,
         source_label: []const u8,

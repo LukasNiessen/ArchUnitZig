@@ -65,6 +65,13 @@ pub const ProjectedNodes = struct {
         return self.values.items.len;
     }
 
+    pub fn find(self: *const ProjectedNodes, label: []const u8) ?*const ProjectedNode {
+        for (self.values.items) |*node| {
+            if (std.mem.eql(u8, node.label, label)) return node;
+        }
+        return null;
+    }
+
     pub fn findMutable(self: *ProjectedNodes, label: []const u8) ?*ProjectedNode {
         for (self.values.items) |*node| {
             if (std.mem.eql(u8, node.label, label)) return node;

@@ -48,7 +48,10 @@ fn identity(_: ?*const anyopaque, edge: *const extraction.Edge) ?MappedEdge {
     return .{ .source_label = edge.source, .target_label = edge.target };
 }
 
-fn invalidMapper(_: ?*const anyopaque, _: *const extraction.Edge) ?MappedEdge {
+fn invalidMapper(_: ?*const anyopaque, edge: *const extraction.Edge) ?MappedEdge {
+    if (std.mem.eql(u8, edge.source, "src/service.zig")) {
+        return .{ .source_label = "service", .target_label = "domain" };
+    }
     return .{ .source_label = "", .target_label = "target" };
 }
 
@@ -117,7 +120,7 @@ test "projected pairs and evidence are sorted deterministically" {
     try std.testing.expectEqualStrings("src/service.zig", projected.items()[2].source_label);
 }
 
-test "empty graphs and invalid mapped labels have explicit results" {
+test "empty graphs and partially built invalid mappings have explicit results" {
     var empty: Graph = .{};
     defer empty.deinit(std.testing.allocator);
     var projected = try projectEdges(
