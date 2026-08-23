@@ -1,0 +1,7 @@
+.{
+    .name = .slices_basic,
+    .version = "0.0.0",
+    .fingerprint = 0xd4db5f4a4537550a,
+    .minimum_zig_version = "0.16.0-dev.1484+375f62447",
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}

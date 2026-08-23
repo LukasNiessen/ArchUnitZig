@@ -116,6 +116,12 @@ pub const SliceLabels = slice_rules.SliceLabels;
 pub const SliceProjection = slice_rules.SliceProjection;
 pub const SliceProjectionError = slice_rules.SliceProjectionError;
 pub const SliceSuffix = slice_rules.SliceSuffix;
+pub const SliceBuilderError = slice_rules.SliceBuilderError;
+pub const ProjectSliceOptions = slice_rules.ProjectSliceOptions;
+pub const ProjectSlices = slice_rules.ProjectSlices;
+pub const SliceDependencyRule = slice_rules.SliceDependencyRule;
+pub const SlicesShould = slice_rules.SlicesShould;
+pub const SlicesShouldNot = slice_rules.SlicesShouldNot;
 pub const TechnicalCode = common_error.TechnicalCode;
 pub const TechnicalError = common_error.TechnicalError;
 pub const UserCode = common_error.UserCode;
@@ -195,6 +201,8 @@ pub const dependencyGraph = graph_reports.dependencyGraph;
 pub const projectGraph = graph_reports.projectGraph;
 pub const projectSliceEdges = slice_rules.projectSliceEdges;
 pub const projectSliceLabels = slice_rules.projectSliceLabels;
+pub const projectSlices = slice_rules.projectSlices;
+pub const slices = slice_rules.slices;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
