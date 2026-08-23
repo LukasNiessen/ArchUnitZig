@@ -9,7 +9,7 @@ files remain part of each dependency package fetched by Zig.
 - Version: 0.4.0
 - Package hash: `zoptia0regex-0.4.0-DssccdU4PwDfwLMvOZKytj_0TDy-EzmFdqOtVq-LyJy8`
 - License: Apache License 2.0
-- Copyright: 2026 Peter Mangold
+- Copyright: 2026 The zoptia0regex authors
 
 The package includes a `NOTICE` file stating that portions are derived from Go's regular expression
 implementation, which is distributed under the BSD 3-Clause license. See the dependency's bundled
