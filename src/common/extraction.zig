@@ -1,6 +1,7 @@
 pub const Edge = @import("extraction/edge.zig").Edge;
 pub const ClassifiedReference = @import("extraction/classifier.zig").ClassifiedReference;
 pub const Graph = @import("extraction/graph.zig").Graph;
+pub const SourceReferences = @import("extraction/graph_normalizer.zig").SourceReferences;
 pub const ImportKind = @import("extraction/import_kind.zig").ImportKind;
 pub const ImportKinds = @import("extraction/import_kind.zig").ImportKinds;
 pub const LocatedProject = @import("extraction/project_locator.zig").LocatedProject;
@@ -29,6 +30,7 @@ pub const SourceLocation = @import("extraction/source_parser.zig").SourceLocatio
 pub const Strictness = @import("extraction/source_parser.zig").Strictness;
 pub const SyntaxDiagnostic = @import("extraction/source_parser.zig").SyntaxDiagnostic;
 pub const parseSource = @import("extraction/source_parser.zig").parseSource;
+pub const normalizeGraph = @import("extraction/graph_normalizer.zig").normalizeGraph;
 pub const resolveRelativeReference = @import("extraction/relative_resolver.zig").resolveRelativeReference;
 pub const resolveModuleReference = @import("extraction/module_resolver.zig").resolveModuleReference;
 pub const validateModuleResolutionOverrides = @import("extraction/module_resolver.zig").validateModuleResolutionOverrides;
@@ -39,6 +41,7 @@ test {
     _ = @import("extraction/classifier.zig");
     _ = @import("extraction/edge.zig");
     _ = @import("extraction/graph.zig");
+    _ = @import("extraction/graph_normalizer.zig");
     _ = @import("extraction/identifier.zig");
     _ = @import("extraction/import_kind.zig");
     _ = @import("extraction/module_resolver.zig");
@@ -46,4 +49,5 @@ test {
     _ = @import("extraction/relative_resolver.zig");
     _ = @import("extraction/source_files.zig");
     _ = @import("extraction/source_parser.zig");
+    _ = @import("extraction/source_location.zig");
 }

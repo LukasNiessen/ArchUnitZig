@@ -30,7 +30,19 @@ pub const Graph = struct {
         external: bool,
         import_kinds: ImportKinds,
     ) AddError!void {
-        var candidate = try Edge.init(allocator, source, target, external, import_kinds);
+        return self.addLocated(allocator, source, target, external, import_kinds, &.{});
+    }
+
+    pub fn addLocated(
+        self: *Graph,
+        allocator: Allocator,
+        source: []const u8,
+        target: []const u8,
+        external: bool,
+        import_kinds: ImportKinds,
+        locations: []const edge_module.SourceLocation,
+    ) AddError!void {
+        var candidate = try Edge.initWithLocations(allocator, source, target, external, import_kinds, locations);
         errdefer candidate.deinit(allocator);
 
         for (self.edges.items) |*existing| {
@@ -41,12 +53,23 @@ pub const Graph = struct {
                 return error.ConflictingExternalClassification;
             }
 
+            try existing.mergeLocations(allocator, candidate.locationItems());
             existing.import_kinds.setUnion(candidate.import_kinds);
             candidate.deinit(allocator);
             return;
         }
 
         try self.edges.append(allocator, candidate);
+    }
+
+    pub fn sort(self: *Graph) void {
+        std.mem.sort(Edge, self.edges.items, {}, struct {
+            fn lessThan(_: void, left: Edge, right: Edge) bool {
+                const source_order = std.mem.order(u8, left.source, right.source);
+                if (source_order != .eq) return source_order == .lt;
+                return std.mem.order(u8, left.target, right.target) == .lt;
+            }
+        }.lessThan);
     }
 
     pub fn clone(self: Graph, allocator: Allocator) Allocator.Error!Graph {
@@ -134,12 +157,14 @@ test "cloning a graph owns independent edges" {
     var graph: Graph = .{};
     defer graph.deinit(std.testing.allocator);
 
-    try graph.add(
+    const location = edge_module.SourceLocation{ .byte_offset = 8, .line = 1, .column = 9 };
+    try graph.addLocated(
         std.testing.allocator,
         "src/main.zig",
         "std",
         true,
         ImportKinds.initOne(.standard_library),
+        &.{location},
     );
 
     var cloned = try graph.clone(std.testing.allocator);
@@ -149,18 +174,22 @@ test "cloning a graph owns independent edges" {
     try std.testing.expect(graph.items()[0].eql(cloned.items()[0]));
     try std.testing.expect(graph.items()[0].source.ptr != cloned.items()[0].source.ptr);
     try std.testing.expect(graph.items()[0].target.ptr != cloned.items()[0].target.ptr);
+    try std.testing.expectEqual(@as(usize, 1), cloned.items()[0].locationItems().len);
+    try std.testing.expect(graph.items()[0].locationItems().ptr != cloned.items()[0].locationItems().ptr);
 }
 
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var graph: Graph = .{};
     defer graph.deinit(allocator);
 
-    try graph.add(
+    const location = edge_module.SourceLocation{ .byte_offset = 12, .line = 1, .column = 13 };
+    try graph.addLocated(
         allocator,
         "src/main.zig",
         "src/service.zig",
         false,
         ImportKinds.initOne(.zig_file),
+        &.{location},
     );
     try graph.add(
         allocator,

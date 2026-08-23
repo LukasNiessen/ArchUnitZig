@@ -2,6 +2,7 @@ const std = @import("std");
 
 const common_error = @import("../error.zig");
 const import_kind = @import("import_kind.zig");
+const source_location = @import("source_location.zig");
 
 const Allocator = std.mem.Allocator;
 pub const ImportKind = import_kind.ImportKind;
@@ -11,12 +12,7 @@ const ReferenceBuiltin = enum { import, embedded_file, c_header };
 /// Controls whether malformed source stops extraction or produces an owned diagnostic.
 pub const Strictness = enum { strict, permissive };
 
-/// Location of a dependency builtin. Byte offsets are zero-based; lines and columns are one-based.
-pub const SourceLocation = struct {
-    byte_offset: u32,
-    line: usize,
-    column: usize,
-};
+pub const SourceLocation = source_location.SourceLocation;
 
 /// An owned literal dependency reference extracted from one Zig source file.
 pub const DependencyReference = struct {
