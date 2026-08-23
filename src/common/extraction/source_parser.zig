@@ -6,14 +6,19 @@ const import_kind = @import("import_kind.zig");
 const Allocator = std.mem.Allocator;
 pub const ImportKind = import_kind.ImportKind;
 
+const ReferenceBuiltin = enum { import, embedded_file, c_header };
+
+/// Controls whether malformed source stops extraction or produces an owned diagnostic.
 pub const Strictness = enum { strict, permissive };
 
+/// Location of a dependency builtin. Byte offsets are zero-based; lines and columns are one-based.
 pub const SourceLocation = struct {
     byte_offset: u32,
     line: usize,
     column: usize,
 };
 
+/// An owned literal dependency reference extracted from one Zig source file.
 pub const DependencyReference = struct {
     target: []u8,
     kind: ImportKind,
@@ -32,6 +37,7 @@ pub const SyntaxDiagnostic = struct {
     location: SourceLocation,
 };
 
+/// Owned parse output. Call `deinit` with the allocator passed to `parseSource`.
 pub const ParseResult = struct {
     source_path: []u8,
     references: std.ArrayList(DependencyReference) = .empty,
@@ -46,6 +52,7 @@ pub const ParseResult = struct {
     }
 };
 
+/// Validates `source` with Zig's AST and extracts literal dependency builtins from its token stream.
 pub fn parseSource(
     allocator: Allocator,
     source_path: []const u8,
@@ -80,15 +87,15 @@ pub fn parseSource(
     while (index < tree.tokens.len) : (index += 1) {
         if (tags[index] != .builtin) continue;
         const builtin = tree.tokenSlice(@intCast(index));
-        const kind: ?ImportKind = if (std.mem.eql(u8, builtin, "@import"))
-            importKindForToken(&tree, index + 2)
+        const reference_builtin: ?ReferenceBuiltin = if (std.mem.eql(u8, builtin, "@import"))
+            .import
         else if (std.mem.eql(u8, builtin, "@embedFile"))
             .embedded_file
         else if (std.mem.eql(u8, builtin, "@cInclude") and insideCImport(&tree, index))
             .c_header
         else
             null;
-        const reference_kind = kind orelse continue;
+        const recognized_builtin = reference_builtin orelse continue;
 
         if (index + 3 >= tree.tokens.len or tags[index + 1] != .l_paren or
             tags[index + 2] != .string_literal or tags[index + 3] != .r_paren)
@@ -124,6 +131,11 @@ pub fn parseSource(
                 continue;
             },
         };
+        const reference_kind: ImportKind = switch (recognized_builtin) {
+            .import => importKindForTarget(decoded),
+            .embedded_file => .embedded_file,
+            .c_header => .c_header,
+        };
         result.references.append(allocator, .{
             .target = decoded,
             .kind = reference_kind,
@@ -136,16 +148,12 @@ pub fn parseSource(
     return result;
 }
 
-fn importKindForToken(tree: *const std.zig.Ast, literal_index: usize) ImportKind {
-    if (literal_index >= tree.tokens.len or tree.tokenTag(@intCast(literal_index)) != .string_literal) {
-        return .named_module;
-    }
-    const raw = tree.tokenSlice(@intCast(literal_index));
-    if (std.mem.eql(u8, raw, "\"std\"")) return .standard_library;
-    if (std.mem.eql(u8, raw, "\"builtin\"")) return .builtin_module;
-    if (std.mem.eql(u8, raw, "\"root\"")) return .root_module;
-    if (std.mem.endsWith(u8, raw, ".zig\"")) return .zig_file;
-    if (std.mem.endsWith(u8, raw, ".zon\"")) return .zon_file;
+fn importKindForTarget(target: []const u8) ImportKind {
+    if (std.mem.eql(u8, target, "std")) return .standard_library;
+    if (std.mem.eql(u8, target, "builtin")) return .builtin_module;
+    if (std.mem.eql(u8, target, "root")) return .root_module;
+    if (std.mem.endsWith(u8, target, ".zig")) return .zig_file;
+    if (std.mem.endsWith(u8, target, ".zon")) return .zon_file;
     return .named_module;
 }
 
@@ -221,6 +229,7 @@ test "extracts imports across Zig constructs and decodes escaped literals" {
 test "extracts embedded resources and C includes only inside cImport" {
     const source: [:0]const u8 =
         \\const data = @embedFile("assets/schema.json");
+        \\comptime { _ = @cInclude("outside-c-import.h"); }
         \\const c = @cImport({
         \\    @cInclude("sqlite3.h");
         \\    @cInclude("vendor/api.h");
@@ -234,6 +243,24 @@ test "extracts embedded resources and C includes only inside cImport" {
     try std.testing.expectEqual(ImportKind.embedded_file, result.references.items[0].kind);
     try std.testing.expectEqual(ImportKind.c_header, result.references.items[1].kind);
     try std.testing.expectEqualStrings("vendor/api.h", result.references.items[2].target);
+}
+
+test "classifies decoded special modules and escaped file extensions" {
+    const source: [:0]const u8 =
+        \\const builtin = @import("buil\x74in");
+        \\const root = @import("root");
+        \\const escaped_file = @import("feature.z\x69g");
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/kinds.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), result.references.items.len);
+    try std.testing.expectEqual(ImportKind.builtin_module, result.references.items[0].kind);
+    try std.testing.expectEqual(ImportKind.root_module, result.references.items[1].kind);
+    try std.testing.expectEqualStrings("feature.zig", result.references.items[2].target);
+    try std.testing.expectEqual(ImportKind.zig_file, result.references.items[2].kind);
 }
 
 test "comments and string contents do not create false references" {
@@ -273,4 +300,72 @@ test "syntax errors follow strictness policy" {
     try std.testing.expectEqual(@as(usize, 0), permissive.references.items.len);
     try std.testing.expectEqual(@as(usize, 1), permissive.diagnostics.items.len);
     try std.testing.expectEqual(DiagnosticKind.syntax_error, permissive.diagnostics.items[0].kind);
+}
+
+test "non-literal dependency operands follow strictness policy" {
+    const source: [:0]const u8 =
+        \\const module_name = "dynamic";
+        \\const path = "asset.txt";
+        \\const dependency = @import(module_name);
+        \\const asset = @embedFile(path);
+    ;
+
+    var strict_context = common_error.ErrorContext.init(std.testing.allocator);
+    defer strict_context.deinit();
+    try std.testing.expectError(
+        error.ParserFailure,
+        parseSource(std.testing.allocator, "src/dynamic.zig", source, .strict, &strict_context),
+    );
+    try std.testing.expectEqual(common_error.ErrorCategory.technical, strict_context.diagnostic.?.category());
+    try std.testing.expectEqualStrings("zig.parse_source", strict_context.diagnostic.?.operation);
+    try std.testing.expectEqualStrings("src/dynamic.zig", strict_context.diagnostic.?.subject.?);
+
+    var permissive_context = common_error.ErrorContext.init(std.testing.allocator);
+    defer permissive_context.deinit();
+    var permissive = try parseSource(
+        std.testing.allocator,
+        "src/dynamic.zig",
+        source,
+        .permissive,
+        &permissive_context,
+    );
+    defer permissive.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), permissive.references.items.len);
+    try std.testing.expectEqual(@as(usize, 2), permissive.diagnostics.items.len);
+    try std.testing.expectEqual(DiagnosticKind.non_literal_operand, permissive.diagnostics.items[0].kind);
+    try std.testing.expectEqual(DiagnosticKind.non_literal_operand, permissive.diagnostics.items[1].kind);
+}
+
+test "reference locations are one-based and retain byte offsets" {
+    const source: [:0]const u8 =
+        \\const first = @import("first.zig");
+        \\    const second = @embedFile("second.txt");
+    ;
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    var result = try parseSource(std.testing.allocator, "src/locations.zig", source, .strict, &context);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(SourceLocation{ .byte_offset = 14, .line = 1, .column = 15 }, result.references.items[0].location);
+    try std.testing.expectEqual(SourceLocation{ .byte_offset = 55, .line = 2, .column = 20 }, result.references.items[1].location);
+}
+
+fn exerciseAllocationFailures(allocator: Allocator) !void {
+    const source: [:0]const u8 =
+        \\const std = @import("std");
+        \\const feature = @import("feature.zig");
+        \\const asset = @embedFile("asset.txt");
+    ;
+    var context = common_error.ErrorContext.init(allocator);
+    defer context.deinit();
+    var result = try parseSource(allocator, "src/allocations.zig", source, .strict, &context);
+    defer result.deinit(allocator);
+}
+
+test "source parsing cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseAllocationFailures,
+        .{},
+    );
 }
