@@ -59,6 +59,7 @@ pub const ViolationFactory = struct {
             .file_dependency => |value| formatFileDependency(allocator, value, rule_sentence),
             .layer_dependency => |value| formatLayerDependency(allocator, value, rule_sentence),
             .matching => |value| formatMatching(allocator, value, rule_sentence),
+            .slice_dependency => |value| formatSliceDependency(allocator, value, rule_sentence),
         };
     }
 
@@ -238,6 +239,43 @@ fn formatLayerDependency(
         "Layer dependency violation",
         "layer_dependency",
         value.dependency.source_label,
+        &output,
+    );
+}
+
+fn formatSliceDependency(
+    allocator: Allocator,
+    value: assertion.SliceDependencyViolation,
+    rule_sentence: []const u8,
+) FormatError!FormattedViolation {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeRule(&output.writer, rule_sentence) catch return error.OutOfMemory;
+    output.writer.writeAll("\nDependency: ") catch return error.OutOfMemory;
+    writePath(&output.writer, value.source_slice) catch return error.OutOfMemory;
+    output.writer.writeAll(" -> ") catch return error.OutOfMemory;
+    writePath(&output.writer, value.target_slice) catch return error.OutOfMemory;
+    if (value.mood.isNegated()) {
+        output.writer.print(
+            "\nReason: slice \"{s}\" may not depend on slice \"{s}\"\nImports:",
+            .{ value.source_slice, value.target_slice },
+        ) catch return error.OutOfMemory;
+        const dependency = value.dependency.?;
+        try writeProjectedEdge(
+            allocator,
+            &output.writer,
+            dependency,
+            dependency.evidence()[0].external,
+        );
+    } else {
+        output.writer.writeAll("\nReason: required slice dependency is absent") catch
+            return error.OutOfMemory;
+    }
+    return finish(
+        allocator,
+        "Slice dependency violation",
+        "slice_dependency",
+        value.source_slice,
         &output,
     );
 }
@@ -823,6 +861,72 @@ test "layer dependency formatter explains sealed allowlists and strict unassigne
             "Imports:\n" ++
             "  - src/application/service.zig:2:16 -> src/support/logger.zig [zig_file]",
         strict_formatted.details,
+    );
+}
+
+test "slice dependency formatter distinguishes forbidden evidence from a required missing edge" {
+    var raw = try extraction.Edge.initClassifiedWithLocations(
+        std.testing.allocator,
+        "src\\features\\api\\root.zig",
+        "src\\features\\retrieval\\repository.zig",
+        false,
+        extraction.ImportKinds.initOne(.zig_file),
+        .internal,
+        .resolved,
+        &.{.{ .byte_offset = 25, .line = 2, .column = 21 }},
+    );
+    defer raw.deinit(std.testing.allocator);
+    var edge = try projection.ProjectedEdge.init(
+        std.testing.allocator,
+        .{ .source_label = "api", .target_label = "retrieval" },
+        raw,
+    );
+    defer edge.deinit(std.testing.allocator);
+
+    var forbidden_payload = try assertion.SliceDependencyViolation.initClone(
+        std.testing.allocator,
+        "api",
+        "retrieval",
+        .should_not,
+        edge,
+    );
+    var forbidden = assertion.Violation.fromSliceDependencyMove(&forbidden_payload);
+    defer forbidden.deinit(std.testing.allocator);
+    var forbidden_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        forbidden,
+        "project slices should not contain dependency api -> retrieval",
+    );
+    defer forbidden_formatted.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "Rule: project slices should not contain dependency api -> retrieval\n" ++
+            "Dependency: api -> retrieval\n" ++
+            "Reason: slice \"api\" may not depend on slice \"retrieval\"\n" ++
+            "Imports:\n" ++
+            "  - src/features/api/root.zig:2:21 -> src/features/retrieval/repository.zig [zig_file]",
+        forbidden_formatted.details,
+    );
+
+    var required_payload = try assertion.SliceDependencyViolation.initClone(
+        std.testing.allocator,
+        "models",
+        "api",
+        .should,
+        null,
+    );
+    var required = assertion.Violation.fromSliceDependencyMove(&required_payload);
+    defer required.deinit(std.testing.allocator);
+    var required_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        required,
+        "project slices should contain dependency models -> api",
+    );
+    defer required_formatted.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "Rule: project slices should contain dependency models -> api\n" ++
+            "Dependency: models -> api\n" ++
+            "Reason: required slice dependency is absent",
+        required_formatted.details,
     );
 }
 
