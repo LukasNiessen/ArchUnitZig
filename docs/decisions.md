@@ -23,8 +23,10 @@ identity so two packages cannot collapse equal relative paths.
 
 ### D003 — Explicit allocation and ownership
 
-Public work that allocates receives a caller-supplied allocator. Owned results expose an explicit
-cleanup path; borrowed views document their lifetime. There is no hidden global allocator.
+Public work that allocates caller-owned data receives a caller-supplied allocator. Owned results
+expose an explicit cleanup path; borrowed views document their lifetime. A process-wide internal
+cache may use a documented library allocator only when it stores clones, exposes invalidation, and
+never transfers that allocator's storage to callers (D019).
 
 Consequence: fluent-builder ergonomics require a prototype before being repeated. Convenience never
 justifies leaks, dangling AST/source slices, or undocumented transfer of ownership.
@@ -238,6 +240,25 @@ distinct because source is part of the key.
 Consequence: downstream traversal and rendering are deterministic across enumeration order and host
 separators. Empty files remain observable, diagnostics can point to every distinct import site, and
 callers may release all parser/classifier buffers immediately after normalization.
+
+### D019 — Graph cache identity is complete and cached values never alias callers
+
+Graph cache identity is a versioned, length-delimited byte encoding of the canonical project root
+and every field in `ExtractionOptions`: exclusions, strictness, resource and C-header toggles,
+compilation-unit/root/module mappings, and build-graph mode. Wyhash accelerates lookup, but equality
+always compares the complete encoding. A reflection test requires each current and future extraction
+or nested module-mapping field to be listed by the key schema. `CheckOptions.clear_cache` controls an
+operation and therefore does not alter graph identity.
+
+An instance `GraphCache` uses its explicit allocator and is not synchronized. It clones both keys and
+graphs on insertion and clones graphs again on lookup; callers may deinitialise source inputs or clear
+the cache without invalidating a result. The process-wide cache uses `page_allocator` behind an atomic
+mutex because a zero-argument `clearGraphCache` must be callable across threads. The lock covers clone
+allocation as well as lookup so invalidation cannot race an in-flight read.
+
+Consequence: equal inputs can reuse extraction without mutable aliases, every invalidation releases
+cache-owned memory, and option growth fails tests until cache identity is consciously updated. An
+instance cache must be externally synchronized when shared; the global helpers provide that boundary.
 
 ## Open decisions
 

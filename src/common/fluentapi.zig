@@ -1,6 +1,8 @@
+pub const BuildGraphMode = @import("fluentapi/check_options.zig").BuildGraphMode;
 pub const CheckOptions = @import("fluentapi/check_options.zig").CheckOptions;
 pub const Checkable = @import("fluentapi/checkable.zig").Checkable;
 pub const CompilationUnitOverride = @import("fluentapi/check_options.zig").CompilationUnitOverride;
+pub const ExtractionOptions = @import("fluentapi/check_options.zig").ExtractionOptions;
 pub const LogLevel = @import("fluentapi/check_options.zig").LogLevel;
 pub const LoggingOptions = @import("fluentapi/check_options.zig").LoggingOptions;
 pub const ModuleOverride = @import("fluentapi/check_options.zig").ModuleOverride;

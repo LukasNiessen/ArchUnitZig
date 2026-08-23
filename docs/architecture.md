@@ -142,6 +142,19 @@ nested marked Zig project is a traversal boundary by default. The owned result c
 project-relative `/` paths for lowercase `.zig` and `.zon` files; custom exclusion globs are additive
 to the documented cache, VCS, output, documentation, and dependency defaults.
 
+Extraction settings live in one `ExtractionOptions` value: exclusions, parser strictness,
+resource/C-header toggles, explicit compilation-unit mappings, and build-graph mode. Graph-cache
+keys use the canonical project root plus a length-delimited encoding of every field. A schema test
+reflects over the options and nested module-mapping structs, so adding a field without acknowledging
+it in key construction fails the suite. Slice order is significant; this may conservatively miss an
+equivalent hit but cannot return a graph produced for different input.
+
+`GraphCache` instances own cloned keys and graphs and are deliberately not synchronized. Reads also
+return clones, so clearing or destroying a cache never invalidates a caller's graph. The process-wide
+cache wraps the same implementation in an atomic mutex, owns storage with `page_allocator`, and is
+invalidated by thread-safe `clearGraphCache`. `CheckOptions.clear_cache` is an operation control, not
+an extraction input, so it does not participate in cache identity.
+
 ## Rules and reports
 
 The first user-facing release prioritises file rules, named layers, and graph reports. Slices follow
@@ -162,9 +175,9 @@ within one selector and AND across selector calls, so the testing layer can expl
 without retaining builders or compiled regular expressions.
 
 Every terminal rule is directly checkable through `check(CheckOptions)`. Options carry the result
-allocator, empty-test/cache flags, per-check logging configuration, extraction exclusions, and an
-explicit Zig compilation-unit/root/module map. These slices are borrowed only for the call; every returned
-`ViolationList` is owned by the supplied allocator.
+allocator, empty-test/cache controls, per-check logging configuration, and the centralized extraction
+options. Their slices are borrowed only for the call; every returned `ViolationList` is owned by the
+supplied allocator.
 
 Heterogeneous rule collections use owned `Checkable` boxes. `fromMove` makes the transfer explicit
 and prevents a stored handle from dangling after a stack rule leaves scope. `checkAll` runs boxes in

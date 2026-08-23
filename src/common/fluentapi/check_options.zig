@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const extraction_options = @import("../extraction/extraction_options.zig");
 const module_resolver = @import("../extraction/module_resolver.zig");
 
 const Allocator = std.mem.Allocator;
@@ -19,6 +20,8 @@ pub const LoggingOptions = struct {
 };
 
 pub const CompilationUnitOverride = module_resolver.CompilationUnitOverride;
+pub const BuildGraphMode = extraction_options.BuildGraphMode;
+pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const ModuleOrigin = module_resolver.ModuleOrigin;
 pub const ModuleOverride = module_resolver.ModuleOverride;
 pub const ModuleResolutionOverrides = module_resolver.ModuleResolutionOverrides;
@@ -30,8 +33,7 @@ pub const CheckOptions = struct {
     allow_empty_tests: bool = false,
     clear_cache: bool = false,
     logging: LoggingOptions = .{},
-    extraction_exclusions: []const []const u8 = &.{},
-    module_resolution: ModuleResolutionOverrides = .{},
+    extraction: ExtractionOptions = .{},
 
     pub fn init(allocator: Allocator) CheckOptions {
         return .{ .allocator = allocator };
@@ -45,8 +47,9 @@ test "check options have safe deterministic defaults" {
     try std.testing.expect(!options.clear_cache);
     try std.testing.expectEqual(LogLevel.disabled, options.logging.level);
     try std.testing.expect(options.logging.include_violations);
-    try std.testing.expectEqual(@as(usize, 0), options.extraction_exclusions.len);
-    try std.testing.expectEqual(@as(usize, 0), options.module_resolution.compilation_units.len);
+    try std.testing.expectEqual(@as(usize, 0), options.extraction.exclusions.len);
+    try std.testing.expectEqual(@as(usize, 0), options.extraction.module_resolution.compilation_units.len);
+    try std.testing.expectEqual(BuildGraphMode.explicit_only, options.extraction.build_graph_mode);
 }
 
 test "check options carry borrowed extraction and Zig module context" {
@@ -65,9 +68,12 @@ test "check options carry borrowed extraction and Zig module context" {
         .allow_empty_tests = true,
         .clear_cache = true,
         .logging = .{ .level = .debug, .include_violations = false },
-        .extraction_exclusions = &exclusions,
-        .module_resolution = .{
-            .compilation_units = &compilation_units,
+        .extraction = .{
+            .exclusions = &exclusions,
+            .strictness = .permissive,
+            .module_resolution = .{
+                .compilation_units = &compilation_units,
+            },
         },
     };
 
@@ -75,9 +81,10 @@ test "check options carry borrowed extraction and Zig module context" {
     try std.testing.expect(options.clear_cache);
     try std.testing.expectEqual(LogLevel.debug, options.logging.level);
     try std.testing.expect(!options.logging.include_violations);
-    try std.testing.expectEqualStrings("generated/**", options.extraction_exclusions[1]);
-    try std.testing.expectEqualStrings("app", options.module_resolution.compilation_units[0].id);
-    try std.testing.expectEqualStrings("src/main.zig", options.module_resolution.compilation_units[0].root_source_path.?);
-    try std.testing.expectEqualStrings("domain", options.module_resolution.compilation_units[0].modules[0].name);
-    try std.testing.expectEqual(ModuleOrigin.package, options.module_resolution.compilation_units[0].modules[1].origin);
+    try std.testing.expectEqualStrings("generated/**", options.extraction.exclusions[1]);
+    try std.testing.expect(options.extraction.strictness == .permissive);
+    try std.testing.expectEqualStrings("app", options.extraction.module_resolution.compilation_units[0].id);
+    try std.testing.expectEqualStrings("src/main.zig", options.extraction.module_resolution.compilation_units[0].root_source_path.?);
+    try std.testing.expectEqualStrings("domain", options.extraction.module_resolution.compilation_units[0].modules[0].name);
+    try std.testing.expectEqual(ModuleOrigin.package, options.extraction.module_resolution.compilation_units[0].modules[1].origin);
 }
