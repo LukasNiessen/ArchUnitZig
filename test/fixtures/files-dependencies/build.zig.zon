@@ -1,0 +1,5 @@
+.{
+    .name = .archunit_files_dependencies_fixture,
+    .version = "0.0.0",
+    .fingerprint = 0xc17c6ea2f944b53d,
+}

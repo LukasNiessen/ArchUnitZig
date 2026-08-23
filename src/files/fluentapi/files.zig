@@ -5,7 +5,9 @@ const common_error = @import("../../common/error.zig");
 const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
+const projection = @import("../../common/projection.zig");
 const matching_files = @import("../assertion/matching_files.zig");
+const dependency_assertion = @import("../assertion/depend_on_files.zig");
 const file_cycles = @import("../projection/file_cycles.zig");
 
 const Allocator = std.mem.Allocator;
@@ -349,6 +351,33 @@ pub const FilesScope = struct {
         return result;
     }
 
+    /// Selects internal dependency-object candidates. Unlike subject selection, this also includes
+    /// concrete non-Zig targets such as ZON and embedded files that have no synthetic self-edge.
+    pub fn selectDependencyObjects(
+        self: *const FilesScope,
+        graph: *const Graph,
+    ) Allocator.Error!SelectedFiles {
+        var result = SelectedFiles{ .allocator = self.allocator };
+        errdefer result.deinit();
+        for (graph.items()) |edge| {
+            if (edge.external) continue;
+            const candidate = if (std.mem.eql(u8, edge.source, edge.target)) edge.source else edge.target;
+            if (containsSelected(result.values.items, candidate)) continue;
+            if (!try self.matchesPath(candidate)) continue;
+            const owned_path = try self.allocator.dupe(u8, candidate);
+            result.values.append(self.allocator, owned_path) catch {
+                self.allocator.free(owned_path);
+                return error.OutOfMemory;
+            };
+        }
+        std.mem.sort([]u8, result.values.items, {}, struct {
+            fn lessThan(_: void, left: []u8, right: []u8) bool {
+                return std.mem.order(u8, left, right) == .lt;
+            }
+        }.lessThan);
+        return result;
+    }
+
     /// Allocates a stable English-like description from owned selector evidence. The caller frees
     /// the returned slice with `allocator`.
     pub fn description(self: *const FilesScope, allocator: Allocator) Allocator.Error![]u8 {
@@ -380,6 +409,10 @@ pub const FilesScope = struct {
 
     fn writeDescription(self: *const FilesScope, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll("project files");
+        try self.writeSelectorDescription(writer);
+    }
+
+    fn writeSelectorDescription(self: *const FilesScope, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         for (self.selectors.items) |selector| {
             const alternatives = selector.alternatives.items;
             std.debug.assert(alternatives.len != 0);
@@ -486,6 +519,10 @@ pub const FilesShould = struct {
 
     pub fn beInPath(self: *const FilesShould, pattern: Pattern) BuilderError!FilesMatchPattern {
         return FilesMatchPattern.init(&self.rule, pattern, .path);
+    }
+
+    pub fn dependOnFiles(self: *const FilesShould) BuilderError!FilesDependOnBuilder {
+        return .{ .rule = try self.rule.clone() };
     }
 };
 
@@ -622,6 +659,154 @@ pub const FilesMatchPattern = struct {
     }
 };
 
+/// Object-selection stage for the direct file-dependency predicate. At least one object selector
+/// is required before the value becomes checkable.
+pub const FilesDependOnBuilder = struct {
+    rule: FileRuleContext,
+
+    pub fn deinit(self: *FilesDependOnBuilder) void {
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn withName(self: *const FilesDependOnBuilder, patterns: []const Pattern) BuilderError!FilesDependOn {
+        return self.startPatterns(patterns, .filename);
+    }
+
+    pub fn inFolder(self: *const FilesDependOnBuilder, patterns: []const Pattern) BuilderError!FilesDependOn {
+        return self.startPatterns(patterns, .path_without_filename);
+    }
+
+    pub fn inPath(self: *const FilesDependOnBuilder, patterns: []const Pattern) BuilderError!FilesDependOn {
+        return self.startPatterns(patterns, .path);
+    }
+
+    pub fn inFile(self: *const FilesDependOnBuilder, paths: []const []const u8) BuilderError!FilesDependOn {
+        var base = try projectFiles(self.rule.scope.allocator, .{});
+        defer base.deinit();
+        var objects = try base.inFile(paths);
+        defer objects.deinit();
+        return FilesDependOn.init(&self.rule, &objects);
+    }
+
+    fn startPatterns(
+        self: *const FilesDependOnBuilder,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesDependOn {
+        var base = try projectFiles(self.rule.scope.allocator, .{});
+        defer base.deinit();
+        var objects = try base.selectPatterns(patterns, target);
+        defer objects.deinit();
+        return FilesDependOn.init(&self.rule, &objects);
+    }
+};
+
+/// Checkable direct dependency rule with one or more independently owned object selectors.
+pub const FilesDependOn = struct {
+    rule: FileRuleContext,
+    objects: FilesScope,
+
+    fn init(rule: *const FileRuleContext, objects: *const FilesScope) BuilderError!FilesDependOn {
+        var result = FilesDependOn{
+            .rule = try rule.clone(),
+            .objects = undefined,
+        };
+        errdefer result.rule.deinit();
+        result.objects = try objects.clone();
+        return result;
+    }
+
+    pub fn deinit(self: *FilesDependOn, allocator: Allocator) void {
+        _ = allocator;
+        self.objects.deinit();
+        self.rule.deinit();
+        self.* = undefined;
+    }
+
+    pub fn withName(self: *const FilesDependOn, patterns: []const Pattern) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.withName(patterns);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
+    pub fn inFolder(self: *const FilesDependOn, patterns: []const Pattern) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.inFolder(patterns);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
+    pub fn inPath(self: *const FilesDependOn, patterns: []const Pattern) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.inPath(patterns);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
+    pub fn inFile(self: *const FilesDependOn, paths: []const []const u8) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.inFile(paths);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
+    pub fn description(self: *const FilesDependOn, allocator: Allocator) Allocator.Error![]u8 {
+        const prefix = try self.rule.description(allocator);
+        defer allocator.free(prefix);
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        output.writer.print("{s} depend on files", .{prefix}) catch return error.OutOfMemory;
+        self.objects.writeSelectorDescription(&output.writer) catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
+    pub fn check(self: *const FilesDependOn, options: CheckOptions) anyerror!assertion.ViolationList {
+        var graph = try extractRuleGraph(&self.rule, options);
+        defer graph.deinit(options.allocator);
+        return self.checkGraph(options, &graph);
+    }
+
+    fn checkGraph(
+        self: *const FilesDependOn,
+        options: CheckOptions,
+        graph: *const Graph,
+    ) anyerror!assertion.ViolationList {
+        var subjects = try self.rule.select(graph);
+        defer subjects.deinit();
+        if (subjects.len() == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelection(
+                &self.rule,
+                options.allocator,
+                "files.depend_on_files.subject",
+            );
+        }
+        var objects = try self.objects.selectDependencyObjects(graph);
+        defer objects.deinit();
+        if (objects.len() == 0) {
+            if (options.allow_empty_tests) return .{};
+            return emptySelectionForScope(
+                &self.objects,
+                self.rule.mood(),
+                options.allocator,
+                "files.depend_on_files.object",
+            );
+        }
+
+        var edges = try projection.projectEdges(
+            options.allocator,
+            graph,
+            projection.perInternalEdge(),
+        );
+        defer edges.deinit(options.allocator);
+        return dependency_assertion.gatherFileDependencyViolations(
+            options.allocator,
+            edges.items(),
+            subjects.items(),
+            objects.items(),
+            self.rule.mood(),
+        );
+    }
+};
+
 /// Negated mood stage. It is deliberately one mood flag over the same context and assertions.
 pub const FilesShouldNot = struct {
     rule: FileRuleContext,
@@ -661,6 +846,10 @@ pub const FilesShouldNot = struct {
 
     pub fn beInPath(self: *const FilesShouldNot, pattern: Pattern) BuilderError!FilesMatchPattern {
         return FilesMatchPattern.init(&self.rule, pattern, .path);
+    }
+
+    pub fn dependOnFiles(self: *const FilesShouldNot) BuilderError!FilesDependOnBuilder {
+        return .{ .rule = try self.rule.clone() };
     }
 };
 
@@ -702,13 +891,22 @@ fn emptySelection(
     allocator: Allocator,
     rule_id: []const u8,
 ) anyerror!assertion.ViolationList {
-    var scope = try rule.scopePatterns(allocator);
+    return emptySelectionForScope(&rule.scope, rule.mood(), allocator, rule_id);
+}
+
+fn emptySelectionForScope(
+    scope_value: *const FilesScope,
+    mood: Mood,
+    allocator: Allocator,
+    rule_id: []const u8,
+) anyerror!assertion.ViolationList {
+    var scope = try scope_value.scopePatterns(allocator);
     defer scope.deinit(allocator);
     var payload = try assertion.EmptyTestViolation.init(
         allocator,
         rule_id,
         scope.items(),
-        rule.mood().isNegated(),
+        mood.isNegated(),
     );
     var violation = assertion.Violation.fromEmptyTestMove(&payload);
     var result = assertion.ViolationList{};
@@ -717,6 +915,11 @@ fn emptySelection(
         return failure;
     };
     return result;
+}
+
+fn containsSelected(paths: []const []const u8, wanted: []const u8) bool {
+    for (paths) |path| if (std.mem.eql(u8, path, wanted)) return true;
+    return false;
 }
 
 fn selectorPhrase(pattern: ScopePattern) []const u8 {
@@ -1193,6 +1396,277 @@ test "matching terminal cleans up every allocation failure" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         exerciseMatchingTerminalAllocationFailures,
+        .{},
+    );
+}
+
+test "depend on files exposes an object builder in both moods and requires an object selector" {
+    try std.testing.expect(@hasDecl(FilesShould, "dependOnFiles"));
+    try std.testing.expect(@hasDecl(FilesShouldNot, "dependOnFiles"));
+    try std.testing.expect(!@hasDecl(FilesDependOnBuilder, "check"));
+    inline for ([_][]const u8{ "withName", "inFolder", "inPath", "inFile" }) |selector| {
+        try std.testing.expect(@hasDecl(FilesDependOnBuilder, selector));
+        try std.testing.expect(@hasDecl(FilesDependOn, selector));
+    }
+    inline for ([_][]const u8{ "should", "shouldNot", "dependOnFiles" }) |stage| {
+        try std.testing.expect(!@hasDecl(FilesDependOn, stage));
+    }
+}
+
+fn dependencyGraph(allocator: Allocator) !Graph {
+    var graph: Graph = .{};
+    errdefer graph.deinit(allocator);
+    for ([_][]const u8{
+        "src/api/handler.zig",
+        "src/database/model.zig",
+        "src/database/root.zig",
+    }) |path| try graph.add(allocator, path, path, false, extraction.ImportKinds.initEmpty());
+    try graph.addLocated(
+        allocator,
+        "src/api/handler.zig",
+        "src/database/root.zig",
+        false,
+        extraction.ImportKinds.initOne(.named_module),
+        &.{.{ .byte_offset = 0, .line = 1, .column = 1 }},
+    );
+    try graph.addLocated(
+        allocator,
+        "src/api/handler.zig",
+        "config.zon",
+        false,
+        extraction.ImportKinds.initOne(.zon_file),
+        &.{.{ .byte_offset = 20, .line = 2, .column = 1 }},
+    );
+    try graph.addLocated(
+        allocator,
+        "src/database/root.zig",
+        "src/database/model.zig",
+        false,
+        extraction.ImportKinds.initOne(.zig_file),
+        &.{.{ .byte_offset = 0, .line = 1, .column = 1 }},
+    );
+    try graph.add(
+        allocator,
+        "src/api/handler.zig",
+        "std",
+        true,
+        extraction.ImportKinds.initOne(.standard_library),
+    );
+    graph.sort();
+    return graph;
+}
+
+fn dependencySubject(allocator: Allocator, mood: Mood) !FileRuleContext {
+    var entry = try projectFiles(allocator, .{});
+    defer entry.deinit();
+    var api = try entry.inFile(&.{"src/api/handler.zig"});
+    defer api.deinit();
+    return FileRuleContext.init(&api, mood);
+}
+
+test "dependency object selection includes ZON targets and excludes external modules" {
+    var graph = try dependencyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var scope = try projectFiles(std.testing.allocator, .{});
+    defer scope.deinit();
+    var selected = try scope.selectDependencyObjects(&graph);
+    defer selected.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), selected.len());
+    try std.testing.expectEqualStrings("config.zon", selected.items()[0]);
+    try std.testing.expectEqualStrings("src/api/handler.zig", selected.items()[1]);
+    try std.testing.expect(!containsSelected(selected.items(), "std"));
+}
+
+test "direct dependency allowlists and blocklists chain object selectors with grouped evidence" {
+    var graph = try dependencyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var positive_rule = try dependencySubject(std.testing.allocator, .should);
+    defer positive_rule.deinit();
+    var positive_builder = FilesDependOnBuilder{ .rule = try positive_rule.clone() };
+    defer positive_builder.deinit();
+    var database_folder = try positive_builder.inFolder(&.{.{ .glob = "src/database" }});
+    defer database_folder.deinit(std.testing.allocator);
+    var database_root = try database_folder.withName(&.{.{ .glob = "root.zig" }});
+    defer database_root.deinit(std.testing.allocator);
+    var positive = try database_root.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer positive.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), positive.items().len);
+    try std.testing.expectEqualStrings("config.zon", positive.items()[0].file_dependency.items()[0].target_label);
+
+    var negative_rule = try dependencySubject(std.testing.allocator, .should_not);
+    defer negative_rule.deinit();
+    var negative_builder = FilesDependOnBuilder{ .rule = try negative_rule.clone() };
+    defer negative_builder.deinit();
+    var forbidden = try negative_builder.inPath(&.{
+        .{ .glob = "src/database/**" },
+        .{ .glob = "config.zon" },
+    });
+    defer forbidden.deinit(std.testing.allocator);
+    var negative = try forbidden.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer negative.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), negative.items().len);
+    try std.testing.expectEqual(@as(usize, 2), negative.items()[0].file_dependency.items().len);
+    try std.testing.expectEqualStrings("src/api/handler.zig", negative.items()[0].file_dependency.source_path);
+    try std.testing.expectEqual(@as(u32, 1), negative.items()[0].file_dependency.items()[1].evidence()[0].locationItems()[0].line);
+}
+
+test "dependency checks are direct only and ignore normalization self edges" {
+    var graph = try dependencyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var rule = try dependencySubject(std.testing.allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesDependOnBuilder{ .rule = try rule.clone() };
+    defer builder.deinit();
+    var transitive_object = try builder.inFile(&.{"src/database/model.zig"});
+    defer transitive_object.deinit(std.testing.allocator);
+    var transitive = try transitive_object.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer transitive.deinit(std.testing.allocator);
+    try std.testing.expect(transitive.passes());
+
+    var self_object = try builder.inFile(&.{"src/api/handler.zig"});
+    defer self_object.deinit(std.testing.allocator);
+    var self_result = try self_object.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer self_result.deinit(std.testing.allocator);
+    try std.testing.expect(self_result.passes());
+}
+
+test "dependency rules guard missing subject and object selections separately" {
+    var graph = try dependencyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    var missing_subject = try entry.inFolder(&.{.{ .glob = "missing" }});
+    defer missing_subject.deinit();
+    var missing_mood = try missing_subject.should();
+    defer missing_mood.deinit();
+    var subject_builder = try missing_mood.dependOnFiles();
+    defer subject_builder.deinit();
+    var subject_terminal = try subject_builder.inFolder(&.{.{ .glob = "src/database" }});
+    defer subject_terminal.deinit(std.testing.allocator);
+    var subject_result = try subject_terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer subject_result.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_files.subject",
+        subject_result.items()[0].empty_test.rule_id,
+    );
+
+    var api = try entry.inFile(&.{"src/api/handler.zig"});
+    defer api.deinit();
+    var negated = try api.shouldNot();
+    defer negated.deinit();
+    var object_builder = try negated.dependOnFiles();
+    defer object_builder.deinit();
+    var object_terminal = try object_builder.inFolder(&.{.{ .glob = "missing" }});
+    defer object_terminal.deinit(std.testing.allocator);
+    var object_result = try object_terminal.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer object_result.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "files.depend_on_files.object",
+        object_result.items()[0].empty_test.rule_id,
+    );
+    try std.testing.expect(object_result.items()[0].empty_test.is_negated);
+
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.allow_empty_tests = true;
+    var allowed = try object_terminal.checkGraph(options, &graph);
+    defer allowed.deinit(std.testing.allocator);
+    try std.testing.expect(allowed.passes());
+}
+
+test "API to database fixture resolves module aliases and ZON objects with locations" {
+    const modules = [_]fluentapi.ModuleOverride{.{
+        .name = "database",
+        .source_path = "src/database/root.zig",
+    }};
+    const units = [_]fluentapi.CompilationUnitOverride{.{
+        .id = "app",
+        .root_source_path = "src/main.zig",
+        .modules = &modules,
+    }};
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-dependencies" });
+    defer entry.deinit();
+    var api = try entry.inFolder(&.{.{ .glob = "src/api" }});
+    defer api.deinit();
+    var negated = try api.shouldNot();
+    defer negated.deinit();
+    var builder = try negated.dependOnFiles();
+    defer builder.deinit();
+    var database = try builder.inFolder(&.{.{ .glob = "src/database" }});
+    defer database.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = .{ .compilation_units = &units };
+    var database_result = try database.check(options);
+    defer database_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), database_result.items().len);
+    const alias_edge = database_result.items()[0].file_dependency.items()[0].evidence()[0];
+    try std.testing.expect(alias_edge.import_kinds.contains(.named_module));
+    try std.testing.expectEqual(@as(u32, 1), alias_edge.locationItems()[0].line);
+
+    var config = try builder.inFile(&.{"config.zon"});
+    defer config.deinit(std.testing.allocator);
+    var config_result = try config.check(options);
+    defer config_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), config_result.items().len);
+    const zon_edge = config_result.items()[0].file_dependency.items()[0].evidence()[0];
+    try std.testing.expect(zon_edge.import_kinds.contains(.zon_file));
+    try std.testing.expectEqual(@as(u32, 2), zon_edge.locationItems()[0].line);
+
+    var positive = try api.should();
+    defer positive.deinit();
+    var positive_builder = try positive.dependOnFiles();
+    defer positive_builder.deinit();
+    var allowed_terminal = try positive_builder.inPath(&.{
+        .{ .glob = "src/database/**" },
+        .{ .glob = "config.zon" },
+    });
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &allowed_terminal);
+    defer erased.deinit();
+    var allowed_result = try erased.check(options);
+    defer allowed_result.deinit(std.testing.allocator);
+    try std.testing.expect(allowed_result.passes());
+}
+
+fn exerciseDependOnAllocationFailures(allocator: Allocator) !void {
+    var graph = try dependencyGraph(allocator);
+    defer graph.deinit(allocator);
+    var rule = try dependencySubject(allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesDependOnBuilder{ .rule = try rule.clone() };
+    defer builder.deinit();
+    var terminal = try builder.inPath(&.{
+        .{ .glob = "src/database/**" },
+        .{ .glob = "config.zon" },
+    });
+    defer terminal.deinit(allocator);
+    var result = try terminal.checkGraph(CheckOptions.init(allocator, std.testing.io), &graph);
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.items().len);
+}
+
+test "depend on files terminal cleans up every allocation failure" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseDependOnAllocationFailures,
         .{},
     );
 }

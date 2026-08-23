@@ -2,6 +2,8 @@ pub const BuilderError = @import("files/fluentapi/files.zig").BuilderError;
 pub const FilesScope = @import("files/fluentapi/files.zig").FilesScope;
 pub const FilesHaveNoCycles = @import("files/fluentapi/files.zig").FilesHaveNoCycles;
 pub const FilesMatchPattern = @import("files/fluentapi/files.zig").FilesMatchPattern;
+pub const FilesDependOnBuilder = @import("files/fluentapi/files.zig").FilesDependOnBuilder;
+pub const FilesDependOn = @import("files/fluentapi/files.zig").FilesDependOn;
 pub const FilesShould = @import("files/fluentapi/files.zig").FilesShould;
 pub const FilesShouldNot = @import("files/fluentapi/files.zig").FilesShouldNot;
 pub const ProjectOptions = @import("files/fluentapi/files.zig").ProjectOptions;
@@ -10,8 +12,10 @@ pub const SelectedFiles = @import("files/fluentapi/files.zig").SelectedFiles;
 pub const files = @import("files/fluentapi/files.zig").files;
 pub const projectFiles = @import("files/fluentapi/files.zig").projectFiles;
 pub const gatherMatchingFileViolations = @import("files/assertion/matching_files.zig").gatherMatchingFileViolations;
+pub const gatherFileDependencyViolations = @import("files/assertion/depend_on_files.zig").gatherFileDependencyViolations;
 
 test {
     _ = @import("files/assertion/matching_files.zig");
+    _ = @import("files/assertion/depend_on_files.zig");
     _ = @import("files/fluentapi/files.zig");
 }
