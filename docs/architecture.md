@@ -108,6 +108,13 @@ returns owned syntax diagnostics instead; a file rejected by the AST contributes
 This policy preserves deterministic whole-file analysis while allowing callers such as editors to
 continue across broken files.
 
+An ordinary line comment may suppress intentional dependency occurrences with `// archunit: ignore`.
+A trailing directive applies to literal dependency calls spanning that line; a standalone directive
+applies only to a builtin beginning on the immediately following physical line. Optional targets are
+comma/whitespace separated and compare exactly after Zig string-literal decoding. Directive comments
+are found only in tokenizer gaps, so doc comments, strings, and multiline strings are not annotations.
+Malformed intended directives are located user errors rather than silently changing graph output.
+
 Relative `.zig`, `.zon`, and embedded-file paths resolve from the importing file. The resolver
 collapses `.` and `..` segments using project-relative `/` identifiers before filesystem access.
 Existing targets are canonicalised against the canonical project root, which also catches paths
@@ -184,8 +191,8 @@ and prevents a stored handle from dangling after a stack rule leaves scope. `che
 order, moves their violations into one result, and discards partial results when a later rule returns
 a user or technical error.
 
-Errors have two disjoint sets. `UserError` covers malformed patterns, unknown layers, impossible
-options, invalid paths/module overrides, and invalid fluent stages. `TechnicalError` covers I/O,
+Errors have two disjoint sets. `UserError` covers malformed patterns/directives, unknown layers,
+impossible options, invalid paths/module overrides, and invalid fluent stages. `TechnicalError` covers I/O,
 allocation, malformed project metadata, unsupported build output, parser failure, and internal
 invariants. Native causes are mapped at the boundary rather than leaked as an unstable public set.
 An optional owned `ErrorContext` retains the stable operation, subject, and underlying cause for the
