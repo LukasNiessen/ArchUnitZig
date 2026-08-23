@@ -10,8 +10,10 @@ pub const SelectedFiles = @import("files/fluentapi/files.zig").SelectedFiles;
 pub const files = @import("files/fluentapi/files.zig").files;
 pub const projectFiles = @import("files/fluentapi/files.zig").projectFiles;
 pub const gatherMatchingFileViolations = @import("files/assertion/matching_files.zig").gatherMatchingFileViolations;
+pub const gatherFileDependencyViolations = @import("files/assertion/depend_on_files.zig").gatherFileDependencyViolations;
 
 test {
     _ = @import("files/assertion/matching_files.zig");
+    _ = @import("files/assertion/depend_on_files.zig");
     _ = @import("files/fluentapi/files.zig");
 }

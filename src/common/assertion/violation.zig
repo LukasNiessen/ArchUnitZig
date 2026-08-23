@@ -2,11 +2,13 @@ const std = @import("std");
 
 const empty_test = @import("empty_test_violation.zig");
 const cycle_violation = @import("cycle_violation.zig");
+const file_dependency_violation = @import("file_dependency_violation.zig");
 const matching_violation = @import("matching_violation.zig");
 
 const Allocator = std.mem.Allocator;
 pub const EmptyTestViolation = empty_test.EmptyTestViolation;
 pub const CycleViolation = cycle_violation.CycleViolation;
+pub const FileDependencyViolation = file_dependency_violation.FileDependencyViolation;
 pub const MatchingViolation = matching_violation.MatchingViolation;
 
 /// Closed, data-only architecture disagreement. Formatters exhaustively switch on this union in
@@ -14,10 +16,11 @@ pub const MatchingViolation = matching_violation.MatchingViolation;
 pub const Violation = union(enum) {
     cycle: CycleViolation,
     empty_test: EmptyTestViolation,
+    file_dependency: FileDependencyViolation,
     matching: MatchingViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
@@ -37,6 +40,12 @@ pub const Violation = union(enum) {
         return result;
     }
 
+    pub fn fromFileDependencyMove(payload: *FileDependencyViolation) Violation {
+        const result = Violation{ .file_dependency = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
     pub fn kind(self: Violation) Kind {
         return std.meta.activeTag(self);
     }
@@ -45,6 +54,7 @@ pub const Violation = union(enum) {
         return switch (self) {
             .cycle => |value| .{ .cycle = try value.clone(allocator) },
             .empty_test => |value| .{ .empty_test = try value.clone(allocator) },
+            .file_dependency => |value| .{ .file_dependency = try value.clone(allocator) },
             .matching => |value| .{ .matching = try value.clone(allocator) },
         };
     }
@@ -53,6 +63,7 @@ pub const Violation = union(enum) {
         switch (self.*) {
             .cycle => |*value| value.deinit(allocator),
             .empty_test => |*value| value.deinit(allocator),
+            .file_dependency => |*value| value.deinit(allocator),
             .matching => |*value| value.deinit(allocator),
         }
         self.* = undefined;
@@ -63,6 +74,7 @@ pub const Violation = union(enum) {
         return switch (self) {
             .cycle => |left| left.eql(other.cycle),
             .empty_test => |left| left.eql(other.empty_test),
+            .file_dependency => |left| left.eql(other.file_dependency),
             .matching => |left| left.eql(other.matching),
         };
     }
@@ -72,6 +84,7 @@ fn formatterDispatchBoundary(violation: Violation) []const u8 {
     return switch (violation) {
         .cycle => "format-cycle-in-testing-layer",
         .empty_test => "format-empty-selection-in-testing-layer",
+        .file_dependency => "format-file-dependency-in-testing-layer",
         .matching => "format-matching-disagreement-in-testing-layer",
     };
 }
