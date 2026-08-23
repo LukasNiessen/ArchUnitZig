@@ -743,3 +743,46 @@ Zig semantics and tests; PlantUML conformance remains issue #33.
 Consequence: component rules are deterministic, allocator-safe, and faithful to Zig's external
 module model; orphans, duplicates, overlaps, and missing required edges cannot acquire accidental
 behavior from a dynamic-language port.
+
+### D037 — PlantUML validation is a strict, diagnosable component subset
+
+ArchUnitZig does not embed a general PlantUML parser. `parsePlantUml` accepts one line-oriented
+component block with `@startuml`/`@enduml`, blank lines, whole-line apostrophe or `//` comments,
+trailing apostrophe comments, `component [Name]`, optional `as Alias`, and bracketed or unambiguous
+alias endpoints joined by `->` or `-->`. Bracketed relationship endpoints may introduce an implicit
+component. Aliases require an explicit declaration and are resolved after the whole block, so a
+relationship may precede its declaration.
+
+Unsupported statements are errors rather than ignored pseudo-support. Missing or duplicate
+directives, statements outside the block, malformed declarations/arrows, duplicate component
+declarations, duplicate aliases, and unresolved aliases return `PlantUmlParseResult.invalid` with a
+one-based line, column, stable kind, and message. Identical duplicate relationships are idempotent.
+Successful diagrams own sorted canonical component names and relationship pairs; aliases do not
+escape the parser boundary.
+
+Diagram adherence means equality of directed relationship sets, not merely an allowlist. An actual
+projected dependency absent from the diagram creates an `adhere_to_diagram` slice violation owning
+the projected edge. A diagram dependency absent from the project creates the same structured rule
+kind without fabricated import evidence. Isolated component declarations are descriptive and do
+not require or forbid a relationship by themselves.
+
+`ignoringOrphanSlices` skips extra actual edges with an endpoint undeclared by the diagram. It does
+not hide a declared relationship missing from the project. `ignoringExternalSlices` skips purely
+external actual pairs and expected targets outside the internal slice-label set. If one projected
+pair contains any internal raw evidence, it remains governed even when external evidence also
+aggregated onto it.
+
+Inline diagram bytes and file paths are cloned by the terminal builder, while parsing and file I/O
+remain lazy until `check`. The projection-wide empty guard runs before a file is read. Invalid text
+maps to the user `InvalidDiagram` tag; failed reads map to the technical filesystem tag. The public
+parse result retains the detailed diagnostic for tools that need more than the terminal error tag.
+
+`toPlantUml` and `exportAsPlantUml` use the same projected labels and edges as validation. Generated
+LF UTF-8 declares lexical canonical names, retains isolated internal slices and external targets,
+emits lexical relationships, creates requested parent directories, and is strict-round-trip tested.
+Component names containing `]` or physical line breaks are rejected because the supported bracket
+syntax has no escaping convention.
+
+Consequence: checked-in diagrams detect architecture drift in both directions, generated diagrams
+are reproducible contracts rather than illustrations with different semantics, and the library does
+not overclaim compatibility with unrelated PlantUML constructs.
