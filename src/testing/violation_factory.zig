@@ -57,6 +57,7 @@ pub const ViolationFactory = struct {
             .empty_test => |value| formatEmptyTest(allocator, value, rule_sentence),
             .external_module_dependency => |value| formatExternalDependency(allocator, value, rule_sentence),
             .file_dependency => |value| formatFileDependency(allocator, value, rule_sentence),
+            .layer_dependency => |value| formatLayerDependency(allocator, value, rule_sentence),
             .matching => |value| formatMatching(allocator, value, rule_sentence),
         };
     }
@@ -199,6 +200,50 @@ fn formatExternalDependency(
         value.source_path,
         &output,
     );
+}
+
+fn formatLayerDependency(
+    allocator: Allocator,
+    value: assertion.LayerDependencyViolation,
+    rule_sentence: []const u8,
+) FormatError!FormattedViolation {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeRule(&output.writer, rule_sentence) catch return error.OutOfMemory;
+    output.writer.writeAll("\nDependency: ") catch return error.OutOfMemory;
+    writePath(&output.writer, value.dependency.source_label) catch return error.OutOfMemory;
+    output.writer.writeAll(" -> ") catch return error.OutOfMemory;
+    writePath(&output.writer, value.dependency.target_label) catch return error.OutOfMemory;
+    output.writer.writeAll("\nSource layer: ") catch return error.OutOfMemory;
+    writeLayerAssignment(&output.writer, value.source_layer) catch return error.OutOfMemory;
+    output.writer.writeAll("\nTarget layer: ") catch return error.OutOfMemory;
+    writeLayerAssignment(&output.writer, value.target_layer) catch return error.OutOfMemory;
+    switch (value.policy) {
+        .may_only_depend_on_layers => output.writer.print(
+            "\nReason: layer \"{s}\" may only depend on its declared allowlist",
+            .{value.source_layer.?},
+        ) catch return error.OutOfMemory,
+        .may_not_depend_on_layers => output.writer.print(
+            "\nReason: layer \"{s}\" may not depend on layer \"{s}\"",
+            .{ value.source_layer.?, value.target_layer.? },
+        ) catch return error.OutOfMemory,
+        .unassigned_endpoint => output.writer.writeAll(
+            "\nReason: strict layer assignment requires both internal endpoints to belong to a declared layer",
+        ) catch return error.OutOfMemory,
+    }
+    output.writer.writeAll("\nImports:") catch return error.OutOfMemory;
+    try writeProjectedEdge(allocator, &output.writer, value.dependency, false);
+    return finish(
+        allocator,
+        "Layer dependency violation",
+        "layer_dependency",
+        value.dependency.source_label,
+        &output,
+    );
+}
+
+fn writeLayerAssignment(writer: *std.Io.Writer, value: ?[]const u8) std.Io.Writer.Error!void {
+    try writer.writeAll(value orelse "<unassigned>");
 }
 
 fn formatCycle(
@@ -676,6 +721,108 @@ test "dependency evidence is sorted independently of projected and raw insertion
             "  - src/api.zig:3:7 -> src/alpha.zig [root_module]\n" ++
             "  - src/api.zig:4:2 -> src/zeta.zig [zig_file]",
         formatted.details,
+    );
+}
+
+test "layer dependency formatter retains assignments policy and import location" {
+    var edge = try testProjectedEdge(
+        std.testing.allocator,
+        "src\\presentation\\api.zig",
+        "src\\infrastructure\\db.zig",
+        false,
+        .zig_file,
+        .internal,
+        .resolved,
+        .{ .byte_offset = 14, .line = 2, .column = 9 },
+    );
+    defer edge.deinit(std.testing.allocator);
+    var payload = try assertion.LayerDependencyViolation.initClone(
+        std.testing.allocator,
+        edge,
+        "presentation",
+        "infrastructure",
+        .may_not_depend_on_layers,
+    );
+    var violation = assertion.Violation.fromLayerDependencyMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "project layers should satisfy named dependency policies",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Layer dependency violation", formatted.heading);
+    try std.testing.expectEqualStrings(
+        "Rule: project layers should satisfy named dependency policies\n" ++
+            "Dependency: src/presentation/api.zig -> src/infrastructure/db.zig\n" ++
+            "Source layer: presentation\n" ++
+            "Target layer: infrastructure\n" ++
+            "Reason: layer \"presentation\" may not depend on layer \"infrastructure\"\n" ++
+            "Imports:\n" ++
+            "  - src/presentation/api.zig:2:9 -> src/infrastructure/db.zig [zig_file]",
+        formatted.details,
+    );
+}
+
+test "layer dependency formatter explains sealed allowlists and strict unassigned endpoints" {
+    var edge = try testProjectedEdge(
+        std.testing.allocator,
+        "src/application/service.zig",
+        "src/support/logger.zig",
+        false,
+        .zig_file,
+        .internal,
+        .resolved,
+        .{ .byte_offset = 44, .line = 2, .column = 16 },
+    );
+    defer edge.deinit(std.testing.allocator);
+
+    var allow_payload = try assertion.LayerDependencyViolation.initClone(
+        std.testing.allocator,
+        edge,
+        "application",
+        "support",
+        .may_only_depend_on_layers,
+    );
+    var allow_violation = assertion.Violation.fromLayerDependencyMove(&allow_payload);
+    defer allow_violation.deinit(std.testing.allocator);
+    var allow_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        allow_violation,
+        "project layers should satisfy named dependency policies",
+    );
+    defer allow_formatted.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        allow_formatted.details,
+        "Reason: layer \"application\" may only depend on its declared allowlist",
+    ) != null);
+
+    var strict_payload = try assertion.LayerDependencyViolation.initClone(
+        std.testing.allocator,
+        edge,
+        "application",
+        null,
+        .unassigned_endpoint,
+    );
+    var strict_violation = assertion.Violation.fromLayerDependencyMove(&strict_payload);
+    defer strict_violation.deinit(std.testing.allocator);
+    var strict_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        strict_violation,
+        "project layers should satisfy named dependency policies",
+    );
+    defer strict_formatted.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "Rule: project layers should satisfy named dependency policies\n" ++
+            "Dependency: src/application/service.zig -> src/support/logger.zig\n" ++
+            "Source layer: application\n" ++
+            "Target layer: <unassigned>\n" ++
+            "Reason: strict layer assignment requires both internal endpoints to belong to a declared layer\n" ++
+            "Imports:\n" ++
+            "  - src/application/service.zig:2:16 -> src/support/logger.zig [zig_file]",
+        strict_formatted.details,
     );
 }
 

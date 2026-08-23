@@ -600,3 +600,32 @@ and never deinitializes the caller's handles.
 Consequence: a normal Zig `test` block can use `try expectPasses(&rule, options)` without framework
 registration, diagnostics stay shared and attributable across heterogeneous rules, and callers keep
 explicit control of allocation, I/O, colour, and handle ownership.
+
+### D033 — Layers are ordered ownership over internal file edges
+
+Named layers do not introduce another extraction or graph model. `projectLayers` projects the same
+normalized graph to internal non-self file edges and nodes, then assigns each path to the first
+matching ordered `LayerDefinition`. Overlap is therefore deliberate precedence rather than multiple
+membership. Duplicate layer names are rejected, and empty-policy guards count effective assignments
+after precedence so a completely shadowed source cannot pass vacuously.
+
+Definitions use complete-path or directory filters with the shared glob/regex semantics. Fluent
+transitions deep-clone the optional locator, compiled filters, definitions, and policies; construction
+is I/O-free and previous branches remain independent. Policy sources and targets must already be
+declared. An empty allowlist seals a layer, a blocklist must be non-empty, duplicate targets and
+duplicate same-kind source policies are errors, and blocklists take precedence over allowlists.
+
+Intra-layer edges always pass. An internal edge with an unassigned endpoint is ignored by default;
+the project-level `strict_unassigned_dependencies` option reports it with optional assignment fields
+and the `unassigned_endpoint` policy kind. External/package/compiler/resource edges remain outside
+layer policy. A resolved named module or `root` mapping is internal and participates with its exact
+import kind and location.
+
+Only definitions used as policy sources invoke `guardEmptyTest`; an unused empty definition is
+descriptive data rather than a test. `LayerDependencyViolation` owns one complete projected edge,
+source and target assignments, and the violated policy kind. The closed union and testing formatter
+handle it exhaustively.
+
+Consequence: layers remain a readable convenience over proven file semantics, overlap and strictness
+are reviewable choices, module aliases cannot bypass policies, and layer reports retain concrete Zig
+import evidence without duplicating extraction logic.
