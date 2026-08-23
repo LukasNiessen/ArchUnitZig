@@ -553,3 +553,26 @@ choice to treat a negative external pattern with no observed match as an empty o
 Consequence: misspelled subject selectors fail uniformly, internal relational typos remain
 defensive, external blocklists can state absence without false failures, and future terminals have
 one allocation-safe guard contract to adopt.
+
+### D031 — Reports cross one exhaustive owned formatting boundary
+
+`ViolationFactory` is the only formatter for the closed `Violation` union. It returns a fully owned
+`FormattedViolation` with separate heading, detail, and plain sort-key fields. The exhaustive switch
+deliberately makes a new in-library violation fail compilation until its report representation is
+defined. Opaque values supplied by a future adapter or plug-in use the separate `formatUnknown`
+entry point, so forward-compatible fallback does not weaken that compile-time check.
+
+`ResultFactory` accepts the rule sentence separately because violations remain data-only and not
+every evidence shape retains its originating scope. It formats all violations, sorts by uncoloured
+content, and only then assigns numbers and optional ANSI styling. Pass and failure messages are
+owned `TestResult` values with clone and deinitialisation support. Paths are normalized to portable
+project-relative spelling, and dependency evidence retains its import location, import kind, target
+class, and availability in the final message.
+
+Colour is explicit policy: `always` and `never` give stable output, while `auto` emits ANSI only when
+the caller reports an ANSI-capable terminal and neither no-colour policy nor a dumb terminal applies.
+Allocation-failure tests cover both factories and golden tests pin every current violation variant,
+multi-violation ordering, Windows path normalization, colour modes, and unknown-value fallback.
+
+Consequence: native and future testing adapters consume one deterministic report contract, cannot
+silently diverge in wording or order, and never need to own violation-specific formatting logic.

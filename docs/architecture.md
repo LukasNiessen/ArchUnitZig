@@ -209,6 +209,19 @@ shape only when it lands, and the testing formatter must then handle the new tag
 kernel does not render final prose. `ViolationList` is the owned check result: zero items means pass,
 while `appendMove` makes ownership transfer explicit and clone/deinitialisation cover every payload.
 
+The shared report boundary has two owned stages. `ViolationFactory` exhaustively turns each
+`Violation` variant into a `FormattedViolation` containing a heading, details, and an uncoloured
+sort key. It normalizes project-relative paths to `/`, includes concrete import kinds and source
+locations, and provides a separate `formatUnknown` fallback for opaque adapter or plug-in values.
+`ResultFactory` combines those values with the rule sentence, sorts before numbering, and returns a
+pass/fail `TestResult` with one owned message. Adapters must delegate to these factories rather than
+invent their own prose.
+
+Colour is applied only while assembling the final result, after ordering has been decided. `always`
+and `never` are deterministic testable choices; `auto` requires the caller to declare an ANSI-capable
+terminal and is suppressed by no-colour policy or a dumb terminal. Plain text therefore remains the
+safe default for redirected output and tools that cannot establish terminal capabilities.
+
 The `empty_test` tag records a stable machine `rule_id`, negation, and scope-pattern
 facts (selector group, glob/regex/literal syntax, target, and exact/partial mode). This preserves OR
 patterns within one selector and AND across selector calls, so the testing layer can explain a
