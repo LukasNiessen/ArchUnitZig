@@ -60,6 +60,11 @@ pub const GraphReportEdge = graph_reports.GraphReportEdge;
 pub const GraphReportNode = graph_reports.GraphReportNode;
 pub const GraphReportSnapshot = graph_reports.GraphReportSnapshot;
 pub const GraphReportSummary = graph_reports.GraphReportSummary;
+pub const CollapseQuery = graph_reports.CollapseQuery;
+pub const FocusQuery = graph_reports.FocusQuery;
+pub const GraphQueryOptions = graph_reports.GraphQueryOptions;
+pub const PatternCollapse = graph_reports.PatternCollapse;
+pub const GraphNodeSelection = graph_reports.NodeSelection;
 pub const ImportKind = extraction.ImportKind;
 pub const ImportKinds = extraction.ImportKinds;
 pub const ImportSummary = extraction.ImportSummary;
@@ -169,6 +174,7 @@ pub const perEdge = projection.perEdge;
 pub const perExternalEdge = projection.perExternalEdge;
 pub const perInternalEdge = projection.perInternalEdge;
 pub const projectFiles = file_rules.projectFiles;
+pub const selectGraphNodes = graph_reports.selectGraphNodes;
 
 test "public facade builds and runs pattern filters" {
     var filter = try RegexFactory.pathMatcher(
