@@ -93,7 +93,9 @@ allocation failures, exact/partial behavior, and a nested-repetition adversarial
 
 Consequence: public code does not expose backend types. Backend replacement remains possible, while
 the adapter owns compilation state and callers supply temporary match allocations. The exact URL,
-version, hash, and notices are recorded in `build.zig.zon` and `THIRD_PARTY_LICENSES.md`.
+version, hash, and notices are recorded in `build.zig.zon` and `THIRD_PARTY_LICENSES.md`. Regex and
+glob wildcards follow the engine's Unicode-scalar semantics; identifiers otherwise remain UTF-8 byte
+slices. This is tested and documented rather than silently treating one byte as one character.
 
 ## Open decisions
 

@@ -33,6 +33,23 @@ Every discovered Zig source file receives a self-edge. Edges with the same `(sou
 merged and union their kinds. Public identifiers are project-relative and separator-normalised to
 `/`, which keeps patterns, diagnostics, cache keys, and golden output portable.
 
+## Pattern matching
+
+`Pattern` distinguishes default glob syntax from the explicit regular-expression escape hatch.
+Globs are anchored: `*` stays in one path segment, `**` crosses segments, `?` matches one character,
+and `[...]` defines a character class. Both user patterns and candidates normalise `\\` separators
+to `/`; matching remains case-sensitive.
+
+The selected regex engine operates on Unicode scalar values. Consequently, glob `?` and character
+classes match one Unicode scalar, which may occupy several UTF-8 bytes. Identifiers remain ordinary
+UTF-8 byte slices for storage, equality, and graph operations; this documented matching behavior
+avoids splitting a valid multi-byte character.
+
+A compiled `Filter` owns its regex program and records one target: filename, full path, path without
+filename, or Zig declaration/type name. Patterns supplied in one selector call are alternatives
+(OR); repeated selector calls are cumulative (AND). Empty alternatives match nothing and zero
+selector calls match everything.
+
 ## Module boundaries
 
 ```text
