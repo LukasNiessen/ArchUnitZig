@@ -13,6 +13,7 @@ pub const SliceDependencyViolation = @import("assertion/slice_dependency_violati
 pub const SliceRuleKind = @import("assertion/slice_dependency_violation.zig").SliceRuleKind;
 pub const MatchingViolation = @import("assertion/matching_violation.zig").MatchingViolation;
 pub const MetricComparison = @import("assertion/metric_violation.zig").MetricComparison;
+pub const MetricPredicateViolation = @import("assertion/metric_predicate_violation.zig").MetricPredicateViolation;
 pub const MetricTargetKind = @import("assertion/metric_violation.zig").MetricTargetKind;
 pub const MetricValue = @import("assertion/metric_violation.zig").MetricValue;
 pub const MetricViolation = @import("assertion/metric_violation.zig").MetricViolation;
@@ -33,6 +34,7 @@ test {
     _ = @import("assertion/slice_dependency_violation.zig");
     _ = @import("assertion/matching_violation.zig");
     _ = @import("assertion/metric_violation.zig");
+    _ = @import("assertion/metric_predicate_violation.zig");
     _ = @import("assertion/scope_pattern.zig");
     _ = @import("assertion/violation.zig");
     _ = @import("assertion/violation_list.zig");
