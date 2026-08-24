@@ -53,6 +53,10 @@ pub const CustomMetricSelection = @import("metrics/fluentapi/metrics.zig").Custo
 pub const CustomMetricThresholdRule = @import("metrics/fluentapi/metrics.zig").CustomMetricThresholdRule;
 pub const CustomMetricPredicateRule = @import("metrics/fluentapi/metrics.zig").CustomMetricPredicateRule;
 pub const metrics = @import("metrics/fluentapi/metrics.zig").metrics;
+pub const MetricsReportData = @import("metrics/reporting.zig").MetricsReportData;
+pub const MetricsReportEntry = @import("metrics/reporting.zig").MetricsReportEntry;
+pub const MetricsReportSection = @import("metrics/reporting.zig").MetricsReportSection;
+pub const MetricsReportSectionKind = @import("metrics/reporting.zig").MetricsReportSectionKind;
 
 test {
     _ = @import("metrics/assertion/threshold.zig");
@@ -62,4 +66,5 @@ test {
     _ = @import("metrics/calculation/custom.zig");
     _ = @import("metrics/fluentapi/metrics.zig");
     _ = @import("metrics/extraction/structural.zig");
+    _ = @import("metrics/reporting.zig");
 }
