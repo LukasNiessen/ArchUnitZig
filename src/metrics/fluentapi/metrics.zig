@@ -2,10 +2,13 @@ const std = @import("std");
 
 const assertion = @import("../../common/assertion.zig");
 const common_error = @import("../../common/error.zig");
+const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
+const projection = @import("../../common/projection.zig");
 const threshold_assertion = @import("../assertion/threshold.zig");
 const count_calculation = @import("../calculation/count.zig");
+const dependency_calculation = @import("../calculation/dependency.zig");
 const structural = @import("../extraction/structural.zig");
 
 const Allocator = std.mem.Allocator;
@@ -19,6 +22,8 @@ pub const StructuralMetrics = structural.StructuralMetrics;
 pub const BuilderError = Allocator.Error || error{
     InvalidPattern,
     InvalidProjectPath,
+    InvalidThreshold,
+    UnsupportedDependencyTarget,
 };
 
 pub const ProjectOptions = struct {
@@ -297,6 +302,13 @@ pub const MetricsScope = struct {
     }
 
     pub fn count(self: *const MetricsScope) BuilderError!CountMetrics {
+        return .{ .scope = try self.clone() };
+    }
+
+    /// Dependency metrics are file-level in the fluent facade. Module and slice projections use
+    /// the public pure `calculateDependencyMetrics` boundary with their own internal labels.
+    pub fn dependency(self: *const MetricsScope) BuilderError!DependencyMetrics {
+        if (self.target_level != .file) return error.UnsupportedDependencyTarget;
         return .{ .scope = try self.clone() };
     }
 
@@ -683,6 +695,351 @@ pub const MetricThresholdRule = struct {
     }
 };
 
+pub const DependencyMetricKind = enum {
+    afferent_coupling,
+    efferent_coupling,
+    instability,
+    coupling_factor,
+
+    pub fn name(self: DependencyMetricKind) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn value(
+        self: DependencyMetricKind,
+        info: dependency_calculation.DependencyMetricInfo,
+    ) assertion.MetricValue {
+        return switch (self) {
+            .afferent_coupling => .{ .unsigned = @intCast(info.afferent_coupling) },
+            .efferent_coupling => .{ .unsigned = @intCast(info.efferent_coupling) },
+            .instability => .{ .floating = info.instability },
+            .coupling_factor => .{ .floating = info.coupling_factor },
+        };
+    }
+};
+
+pub const DependencyMetrics = struct {
+    scope: MetricsScope,
+
+    pub fn deinit(self: *DependencyMetrics) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn analyze(
+        self: *const DependencyMetrics,
+        options: CheckOptions,
+    ) anyerror!dependency_calculation.DependencyMetricSnapshot {
+        var complete = try extractFileDependencyMetrics(&self.scope, options);
+        defer complete.deinit(options.allocator);
+        var selected = dependency_calculation.DependencyMetricSnapshot{
+            .projected_subject_count = complete.projected_subject_count,
+        };
+        errdefer selected.deinit(options.allocator);
+        try selected.values.ensureTotalCapacity(options.allocator, complete.items().len);
+        for (complete.items()) |value| {
+            if (!try self.scope.matches(options.allocator, value.identifier, null, null)) continue;
+            selected.values.appendAssumeCapacity(try value.clone(options.allocator));
+        }
+        return selected;
+    }
+
+    pub fn afferentCoupling(self: *const DependencyMetrics) BuilderError!DependencyCountSelection {
+        return .{ .scope = try self.scope.clone(), .metric = .afferent_coupling };
+    }
+
+    pub fn efferentCoupling(self: *const DependencyMetrics) BuilderError!DependencyCountSelection {
+        return .{ .scope = try self.scope.clone(), .metric = .efferent_coupling };
+    }
+
+    pub fn instability(self: *const DependencyMetrics) BuilderError!DependencyRatioSelection {
+        return .{ .scope = try self.scope.clone(), .metric = .instability };
+    }
+
+    pub fn couplingFactor(self: *const DependencyMetrics) BuilderError!DependencyRatioSelection {
+        return .{ .scope = try self.scope.clone(), .metric = .coupling_factor };
+    }
+
+    pub fn summary(self: *const DependencyMetrics, options: CheckOptions) anyerror!DependencySummary {
+        var snapshot = try self.analyze(options);
+        defer snapshot.deinit(options.allocator);
+        var result = DependencySummary{
+            .projected_subject_count = snapshot.projected_subject_count,
+            .selected_subject_count = snapshot.items().len,
+        };
+        for (snapshot.items()) |value| {
+            result.total_afferent_coupling += value.afferent_coupling;
+            result.total_efferent_coupling += value.efferent_coupling;
+            result.average_instability += value.instability;
+            result.average_coupling_factor += value.coupling_factor;
+        }
+        if (result.selected_subject_count != 0) {
+            const denominator = @as(f64, @floatFromInt(result.selected_subject_count));
+            result.average_instability /= denominator;
+            result.average_coupling_factor /= denominator;
+        }
+        return result;
+    }
+};
+
+pub const DependencySummary = struct {
+    projected_subject_count: usize = 0,
+    selected_subject_count: usize = 0,
+    total_afferent_coupling: usize = 0,
+    total_efferent_coupling: usize = 0,
+    average_instability: f64 = 0.0,
+    average_coupling_factor: f64 = 0.0,
+};
+
+pub const DependencyMeasurement = struct {
+    target_identifier: []u8,
+    metric: DependencyMetricKind,
+    value: assertion.MetricValue,
+
+    pub fn deinit(self: *DependencyMeasurement, allocator: Allocator) void {
+        allocator.free(self.target_identifier);
+        self.* = undefined;
+    }
+};
+
+pub const DependencyMeasurements = struct {
+    values: std.ArrayList(DependencyMeasurement) = .empty,
+
+    pub fn deinit(self: *DependencyMeasurements, allocator: Allocator) void {
+        for (self.values.items) |*value| value.deinit(allocator);
+        self.values.deinit(allocator);
+        self.* = undefined;
+    }
+
+    pub fn items(self: *const DependencyMeasurements) []const DependencyMeasurement {
+        return self.values.items;
+    }
+};
+
+pub const DependencyCountSelection = struct {
+    scope: MetricsScope,
+    metric: DependencyMetricKind,
+
+    pub fn deinit(self: *DependencyCountSelection) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn measure(self: *const DependencyCountSelection, options: CheckOptions) anyerror!DependencyMeasurements {
+        return measureDependency(&self.scope, self.metric, options);
+    }
+
+    pub fn shouldBeBelow(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
+        return dependencyThreshold(&self.scope, self.metric, .below, .{ .unsigned = @intCast(value) });
+    }
+    pub fn shouldBeAbove(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
+        return dependencyThreshold(&self.scope, self.metric, .above, .{ .unsigned = @intCast(value) });
+    }
+    pub fn shouldBe(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
+        return dependencyThreshold(&self.scope, self.metric, .equal, .{ .unsigned = @intCast(value) });
+    }
+    pub fn shouldBeBelowOrEqual(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
+        return dependencyThreshold(&self.scope, self.metric, .below_or_equal, .{ .unsigned = @intCast(value) });
+    }
+    pub fn shouldBeAboveOrEqual(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
+        return dependencyThreshold(&self.scope, self.metric, .above_or_equal, .{ .unsigned = @intCast(value) });
+    }
+};
+
+pub const DependencyRatioSelection = struct {
+    scope: MetricsScope,
+    metric: DependencyMetricKind,
+
+    pub fn deinit(self: *DependencyRatioSelection) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn measure(self: *const DependencyRatioSelection, options: CheckOptions) anyerror!DependencyMeasurements {
+        return measureDependency(&self.scope, self.metric, options);
+    }
+
+    pub fn shouldBeBelow(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
+        return self.threshold(.below, value);
+    }
+    pub fn shouldBeAbove(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
+        return self.threshold(.above, value);
+    }
+    pub fn shouldBe(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
+        return self.threshold(.equal, value);
+    }
+    pub fn shouldBeBelowOrEqual(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
+        return self.threshold(.below_or_equal, value);
+    }
+    pub fn shouldBeAboveOrEqual(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
+        return self.threshold(.above_or_equal, value);
+    }
+
+    fn threshold(
+        self: *const DependencyRatioSelection,
+        comparison: assertion.MetricComparison,
+        value: f64,
+    ) BuilderError!DependencyThresholdRule {
+        if (!std.math.isFinite(value)) return error.InvalidThreshold;
+        return dependencyThreshold(&self.scope, self.metric, comparison, .{ .floating = value });
+    }
+};
+
+pub const DependencyThresholdRule = struct {
+    scope: MetricsScope,
+    metric: DependencyMetricKind,
+    comparison: assertion.MetricComparison,
+    threshold_value: assertion.MetricValue,
+
+    pub fn deinit(self: *DependencyThresholdRule, _: Allocator) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const DependencyThresholdRule, allocator: Allocator) Allocator.Error![]u8 {
+        const scope_description = try self.scope.description(allocator);
+        defer allocator.free(scope_description);
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        output.writer.print(
+            "{s} dependency metric {s} should be {s} ",
+            .{ scope_description, self.metric.name(), comparisonPhrase(self.comparison) },
+        ) catch return error.OutOfMemory;
+        writeMetricValue(&output.writer, self.threshold_value) catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
+    pub fn check(self: *const DependencyThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        var measurements = try measureDependency(&self.scope, self.metric, options);
+        defer measurements.deinit(options.allocator);
+        var evidence = try self.scope.scopePatterns(options.allocator);
+        defer evidence.deinit(options.allocator);
+        if (try assertion.guardEmptyTest(
+            options.allocator,
+            measurements.items().len,
+            options.allow_empty_tests,
+            "metrics.dependency",
+            evidence.items(),
+            .should,
+        )) |guarded| return guarded;
+
+        var result = assertion.ViolationList{};
+        errdefer result.deinit(options.allocator);
+        for (measurements.items()) |measurement| {
+            if (try threshold_assertion.passes(measurement.value, self.comparison, self.threshold_value)) continue;
+            var payload = try assertion.MetricViolation.init(
+                options.allocator,
+                measurement.target_identifier,
+                .file,
+                self.metric.name(),
+                measurement.value,
+                self.comparison,
+                self.threshold_value,
+            );
+            var violation = assertion.Violation.fromMetricMove(&payload);
+            result.appendMove(options.allocator, &violation) catch |failure| {
+                violation.deinit(options.allocator);
+                return failure;
+            };
+        }
+        return result;
+    }
+};
+
+fn dependencyThreshold(
+    scope: *const MetricsScope,
+    metric: DependencyMetricKind,
+    comparison: assertion.MetricComparison,
+    threshold_value: assertion.MetricValue,
+) BuilderError!DependencyThresholdRule {
+    return .{
+        .scope = try scope.clone(),
+        .metric = metric,
+        .comparison = comparison,
+        .threshold_value = threshold_value,
+    };
+}
+
+fn measureDependency(
+    scope: *const MetricsScope,
+    metric: DependencyMetricKind,
+    options: CheckOptions,
+) anyerror!DependencyMeasurements {
+    var builder = DependencyMetrics{ .scope = try scope.clone() };
+    defer builder.deinit();
+    var snapshot = try builder.analyze(options);
+    defer snapshot.deinit(options.allocator);
+    var result = DependencyMeasurements{};
+    errdefer result.deinit(options.allocator);
+    try result.values.ensureTotalCapacity(options.allocator, snapshot.items().len);
+    for (snapshot.items()) |value| {
+        result.values.appendAssumeCapacity(.{
+            .target_identifier = try options.allocator.dupe(u8, value.identifier),
+            .metric = metric,
+            .value = metric.value(value),
+        });
+    }
+    return result;
+}
+
+fn extractFileDependencyMetrics(
+    scope: *const MetricsScope,
+    options: CheckOptions,
+) anyerror!dependency_calculation.DependencyMetricSnapshot {
+    var diagnostics = common_error.ErrorContext.init(options.allocator);
+    defer diagnostics.deinit();
+    var graph = try extraction.extractProjectGraph(
+        options.allocator,
+        options.io,
+        scope.owned_locator,
+        options.working_directory,
+        options.extraction,
+        options.clear_cache,
+        &diagnostics,
+    );
+    defer graph.deinit(options.allocator);
+
+    var labels: std.ArrayList([]const u8) = .empty;
+    defer labels.deinit(options.allocator);
+    var label_set = std.StringHashMap(void).init(options.allocator);
+    defer label_set.deinit();
+    for (graph.items()) |edge| {
+        if (edge.external or !std.mem.eql(u8, edge.source, edge.target)) continue;
+        try labels.append(options.allocator, edge.source);
+        try label_set.put(edge.source, {});
+    }
+    const mapper_context = FileEdgeProjection{ .labels = &label_set };
+    var edges = try projection.projectEdges(
+        options.allocator,
+        &graph,
+        projection.MapFunction.fromContext(FileEdgeProjection, &mapper_context, FileEdgeProjection.map),
+    );
+    defer edges.deinit(options.allocator);
+    return dependency_calculation.calculateDependencyMetrics(
+        options.allocator,
+        labels.items,
+        edges.items(),
+    );
+}
+
+const FileEdgeProjection = struct {
+    labels: *const std.StringHashMap(void),
+
+    fn map(self: *const FileEdgeProjection, edge: *const extraction.Edge) ?projection.MappedEdge {
+        if (edge.external or std.mem.eql(u8, edge.source, edge.target)) return null;
+        if (!self.labels.contains(edge.source) or !self.labels.contains(edge.target)) return null;
+        return .{ .source_label = edge.source, .target_label = edge.target };
+    }
+};
+
+fn writeMetricValue(writer: *std.Io.Writer, value: assertion.MetricValue) std.Io.Writer.Error!void {
+    switch (value) {
+        .signed => |number| try writer.print("{d}", .{number}),
+        .unsigned => |number| try writer.print("{d}", .{number}),
+        .floating => |number| try writer.print("{d}", .{number}),
+    }
+}
+
 pub fn metrics(allocator: Allocator, options: ProjectOptions) BuilderError!MetricsScope {
     return MetricsScope.init(allocator, options);
 }
@@ -862,6 +1219,157 @@ test "count terminals erase as Checkable with an owned sentence" {
     var result = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
     defer result.deinit(std.testing.allocator);
     try std.testing.expect(result.passes());
+}
+
+test "file dependency metrics preserve the full-project denominator after selection" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+    var analysis = try dependencies.analyze(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer analysis.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 5), analysis.projected_subject_count);
+    try std.testing.expectEqual(@as(usize, 1), analysis.items().len);
+    const a = analysis.items()[0];
+    try std.testing.expectEqualStrings("src/a.zig", a.identifier);
+    try std.testing.expectEqual(@as(usize, 0), a.afferent_coupling);
+    try std.testing.expectEqual(@as(usize, 2), a.efferent_coupling);
+    try std.testing.expectEqual(@as(f64, 1.0), a.instability);
+    try std.testing.expectEqual(@as(f64, 0.25), a.coupling_factor);
+
+    const summary = try dependencies.summary(CheckOptions.init(std.testing.allocator, std.testing.io));
+    try std.testing.expectEqual(@as(usize, 5), summary.projected_subject_count);
+    try std.testing.expectEqual(@as(usize, 1), summary.selected_subject_count);
+    try std.testing.expectEqual(@as(usize, 2), summary.total_efferent_coupling);
+    try std.testing.expectEqual(@as(f64, 1.0), summary.average_instability);
+    try std.testing.expectEqual(@as(f64, 0.25), summary.average_coupling_factor);
+}
+
+test "dependency summary aggregates the complete fixture exactly" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var dependencies = try root.dependency();
+    defer dependencies.deinit();
+    const summary = try dependencies.summary(CheckOptions.init(std.testing.allocator, std.testing.io));
+
+    try std.testing.expectEqual(@as(usize, 5), summary.projected_subject_count);
+    try std.testing.expectEqual(@as(usize, 5), summary.selected_subject_count);
+    try std.testing.expectEqual(@as(usize, 3), summary.total_afferent_coupling);
+    try std.testing.expectEqual(@as(usize, 3), summary.total_efferent_coupling);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.3), summary.average_instability, 0.000_001);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.15), summary.average_coupling_factor, 0.000_001);
+}
+
+test "dependency count and ratio measurements retain numeric types" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/b.zig"});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+    var afferent = try dependencies.afferentCoupling();
+    defer afferent.deinit();
+    var incoming = try afferent.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer incoming.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u64, 1), incoming.items()[0].value.unsigned);
+
+    var instability_selection = try dependencies.instability();
+    defer instability_selection.deinit();
+    var instability_values = try instability_selection.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer instability_values.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(f64, 0.5), instability_values.items()[0].value.floating);
+}
+
+test "dependency thresholds use shared violations and empty guards" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+    var efferent = try dependencies.efferentCoupling();
+    defer efferent.deinit();
+    var count_rule = try efferent.shouldBeBelowOrEqual(1);
+    defer count_rule.deinit(std.testing.allocator);
+    var count_result = try count_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer count_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), count_result.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.metric, count_result.items()[0].kind());
+    try std.testing.expectEqualStrings("efferent_coupling", count_result.items()[0].metric.metric_name);
+
+    var instability_selection = try dependencies.instability();
+    defer instability_selection.deinit();
+    var ratio_rule = try instability_selection.shouldBe(1.0);
+    defer ratio_rule.deinit(std.testing.allocator);
+    var ratio_result = try ratio_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer ratio_result.deinit(std.testing.allocator);
+    try std.testing.expect(ratio_result.passes());
+    try std.testing.expectError(error.InvalidThreshold, instability_selection.shouldBeBelow(std.math.nan(f64)));
+
+    var missing = try root.withName(&.{.{ .glob = "missing.zig" }});
+    defer missing.deinit();
+    var missing_dependencies = try missing.dependency();
+    defer missing_dependencies.deinit();
+    var factor = try missing_dependencies.couplingFactor();
+    defer factor.deinit();
+    var empty_rule = try factor.shouldBeBelow(1.0);
+    defer empty_rule.deinit(std.testing.allocator);
+    var empty_result = try empty_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer empty_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, empty_result.items()[0].kind());
+}
+
+test "dependency terminals erase as Checkable and declaration scopes are rejected" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var declarations = try root.forDeclarationsMatching(&.{.{ .glob = "*" }});
+    defer declarations.deinit();
+    try std.testing.expectError(error.UnsupportedDependencyTarget, declarations.dependency());
+
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+    var factor = try dependencies.couplingFactor();
+    defer factor.deinit();
+    var terminal = try factor.shouldBeBelowOrEqual(0.25);
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    const sentence = try erased.description(std.testing.allocator);
+    defer std.testing.allocator.free(sentence);
+    try std.testing.expectEqualStrings(
+        "Zig project files, in file \"src/a.zig\" dependency metric coupling_factor should be below or equal to 0.25",
+        sentence,
+    );
+    var result = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+}
+
+fn exerciseDependencyBuilderAllocationFailures(allocator: Allocator) !void {
+    var root = try metrics(allocator, .{ .locator = "fixture" });
+    defer root.deinit();
+    var selected = try root.inPath(&.{.{ .glob = "src/**" }});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+    var instability_selection = try dependencies.instability();
+    defer instability_selection.deinit();
+    var terminal = try instability_selection.shouldBeBelowOrEqual(0.75);
+    defer terminal.deinit(allocator);
+    const sentence = try terminal.description(allocator);
+    defer allocator.free(sentence);
+}
+
+test "dependency metric builder chains release every partial allocation" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseDependencyBuilderAllocationFailures,
+        .{},
+    );
 }
 
 fn exerciseBuilderAllocationFailures(allocator: Allocator) !void {

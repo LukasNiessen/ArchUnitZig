@@ -25,6 +25,14 @@ pub const CountMetricSelection = @import("metrics/fluentapi/metrics.zig").CountM
 pub const MetricMeasurement = @import("metrics/fluentapi/metrics.zig").MetricMeasurement;
 pub const MetricMeasurements = @import("metrics/fluentapi/metrics.zig").MetricMeasurements;
 pub const MetricThresholdRule = @import("metrics/fluentapi/metrics.zig").MetricThresholdRule;
+pub const DependencyMetricKind = @import("metrics/fluentapi/metrics.zig").DependencyMetricKind;
+pub const DependencyMetrics = @import("metrics/fluentapi/metrics.zig").DependencyMetrics;
+pub const DependencySummary = @import("metrics/fluentapi/metrics.zig").DependencySummary;
+pub const DependencyMeasurement = @import("metrics/fluentapi/metrics.zig").DependencyMeasurement;
+pub const DependencyMeasurements = @import("metrics/fluentapi/metrics.zig").DependencyMeasurements;
+pub const DependencyCountSelection = @import("metrics/fluentapi/metrics.zig").DependencyCountSelection;
+pub const DependencyRatioSelection = @import("metrics/fluentapi/metrics.zig").DependencyRatioSelection;
+pub const DependencyThresholdRule = @import("metrics/fluentapi/metrics.zig").DependencyThresholdRule;
 pub const metrics = @import("metrics/fluentapi/metrics.zig").metrics;
 
 test {
