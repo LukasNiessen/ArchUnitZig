@@ -27,6 +27,64 @@ pub fn extractProjectGraph(
     clear_cache: bool,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!Graph {
+    return extractProjectGraphObserved(
+        allocator,
+        io,
+        locator,
+        working_directory,
+        options,
+        clear_cache,
+        diagnostics,
+        NoopLogger{},
+    );
+}
+
+/// Logging-aware entry point used by fluent operations. The optional logger is deliberately a
+/// generic borrowed value so extraction does not import the assertion-aware logging runtime.
+pub fn extractProjectGraphLogged(
+    allocator: Allocator,
+    io: Io,
+    locator: ?[]const u8,
+    working_directory: []const u8,
+    options: ExtractionOptions,
+    clear_cache: bool,
+    diagnostics: *common_error.ErrorContext,
+    logger: anytype,
+) anyerror!Graph {
+    if (logger) |active| {
+        return extractProjectGraphObserved(
+            allocator,
+            io,
+            locator,
+            working_directory,
+            options,
+            clear_cache,
+            diagnostics,
+            active,
+        );
+    }
+    return extractProjectGraph(
+        allocator,
+        io,
+        locator,
+        working_directory,
+        options,
+        clear_cache,
+        diagnostics,
+    );
+}
+
+fn extractProjectGraphObserved(
+    allocator: Allocator,
+    io: Io,
+    locator: ?[]const u8,
+    working_directory: []const u8,
+    options: ExtractionOptions,
+    clear_cache: bool,
+    diagnostics: *common_error.ErrorContext,
+    logger: anytype,
+) !Graph {
+    try logger.logExtraction("project graph extraction started");
     try module_resolver.validateModuleResolutionOverrides(options.module_resolution, diagnostics);
 
     var project = try project_locator.locateProject(
@@ -38,7 +96,10 @@ pub fn extractProjectGraph(
     );
     defer project.deinit(allocator);
 
-    if (clear_cache) graph_cache.clearGraphCache();
+    if (clear_cache) {
+        graph_cache.clearGraphCache();
+        try logger.logCache("cache cleared");
+    }
     var cache_key = try graph_cache.buildGraphCacheKey(
         allocator,
         io,
@@ -49,15 +110,26 @@ pub fn extractProjectGraph(
     defer cache_key.deinit(allocator);
     if (graph_cache.cloneGraphFromCache(allocator, cache_key) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_get", project.path, error.OutOfMemory);
-    }) |cached| return cached;
+    }) |cached| {
+        try logger.logCache("cache hit");
+        try logger.logExtraction("project graph extraction completed from cache");
+        return cached;
+    }
+    try logger.logCache("cache miss");
 
     var graph = try extractLocatedGraph(allocator, io, project.path, options, diagnostics);
     errdefer graph.deinit(allocator);
     graph_cache.storeGraphInCache(cache_key, graph) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_put", project.path, error.OutOfMemory);
     };
+    try logger.logExtraction("project graph extraction completed");
     return graph;
 }
+
+const NoopLogger = struct {
+    fn logExtraction(_: NoopLogger, _: []const u8) error{}!void {}
+    fn logCache(_: NoopLogger, _: []const u8) error{}!void {}
+};
 
 fn extractLocatedGraph(
     allocator: Allocator,

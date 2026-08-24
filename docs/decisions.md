@@ -1017,3 +1017,44 @@ Consequence: “everything under `src/`, except generated code” stays one diag
 all public APIs, glob and regex behavior remains centralized, fluent builders retain independent
 owned value semantics, and traversal/projection semantics do not accidentally turn exclusions into
 post-processing that erases valid evidence.
+
+### D044 — Logging is explicit, borrowed, and operation-local
+
+`CheckOptions.logging` is nullable and defaults to null. The null path performs no allocation, clock
+read, I/O, or access to stdout/stderr. A configured `LoggingOptions` must contain at least one
+borrowed `std.Io.Writer`, type-erased `LogSink`, or `LogFileOptions`; these sinks may be combined.
+The level vocabulary is exactly `debug`, `info`, `warn`, and `error` (spelled `.@"error"` in Zig).
+Progress, violation, and metric families have independent inclusion switches in addition to the
+level threshold.
+
+One public check, render, or export terminal owns one `LogSession`. It copies `CheckOptions`, creates
+the runtime `CheckLogger` only when needed, and threads an internal pointer through extraction,
+cache access, structural analysis, violation production, metric reporting, and export. Nested
+operations reuse that pointer. There is no process-wide configuration or mutable singleton, and
+concurrent callers are independent unless they intentionally share a caller-owned sink.
+
+The event vocabulary is fixed: `start_check`, `end_check`, `extraction`, `cache`, `violation`,
+`metric`, and `export`, with `message` reserved for internal generic records. `LogSink` records borrow
+their already-sanitized message only for the callback. Clock contexts are also borrowed, making
+deterministic tests possible without changing system time. Level filtering happens before message
+allocation and clock access. Control bytes are replaced, messages are capped, absolute metric
+subjects and export paths retain only their basename, and progress messages never include the
+located project root. Useful normalized project-relative identifiers may remain in metric records.
+
+File logging uses the caller's explicit `std.Io`, creates the configured directory lazily on the
+first emitted event, and chooses a UTC nanosecond filename from the prefix. `overwrite` truncates a
+same-name file; `append` continues it. This makes deterministic fixed-clock behavior explicit rather
+than pretending timestamp names can never collide. Prefixes accept only portable ASCII letters,
+digits, `.`, `_`, and `-`, preventing separator, control-byte, and platform-specific filename
+injection. The session closes its file and releases its path without taking ownership of any
+configuration slice.
+
+Sink, formatting, allocation, directory, and write failures propagate instead of silently dropping
+diagnostics. If a check has already failed, its original error takes precedence over a secondary
+failure while attempting the final error event; otherwise a logging failure is the operation's
+error. Successful export events are emitted only after their artifact has been written, and metrics
+HTML events use the resolved filename including an automatically appended extension.
+
+Consequence: tests can capture logs without corrupting Zig's test-runner protocol, applications can
+integrate structured records without global hooks, parallel architecture checks cannot accidentally
+reconfigure one another, and diagnostics remain explicit about both I/O lifetime and failure.

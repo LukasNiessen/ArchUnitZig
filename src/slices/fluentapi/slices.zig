@@ -212,19 +212,24 @@ pub const ProjectSlices = struct {
 
     /// Extracts once and renders the real slice graph as deterministic PlantUML.
     pub fn toPlantUml(self: *const ProjectSlices, options: CheckOptions) anyerror![]u8 {
-        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var diagnostics = common_error.ErrorContext.init(logged_options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
-            options.allocator,
-            options.io,
+        var graph = try extraction.extractProjectGraphLogged(
+            logged_options.allocator,
+            logged_options.io,
             self.project_locator,
-            options.working_directory,
-            options.extraction,
-            options.clear_cache,
+            logged_options.working_directory,
+            logged_options.extraction,
+            logged_options.clear_cache,
             &diagnostics,
+            logged_options.logger,
         );
-        defer graph.deinit(options.allocator);
-        return self.toPlantUmlGraph(options.allocator, &graph);
+        defer graph.deinit(logged_options.allocator);
+        return self.toPlantUmlGraph(logged_options.allocator, &graph);
     }
 
     pub fn toPlantUmlGraph(
@@ -244,29 +249,35 @@ pub const ProjectSlices = struct {
         options: CheckOptions,
         output_path: []const u8,
     ) anyerror!void {
-        var diagnostics = common_error.ErrorContext.init(options.allocator);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var diagnostics = common_error.ErrorContext.init(logged_options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
-            options.allocator,
-            options.io,
+        var graph = try extraction.extractProjectGraphLogged(
+            logged_options.allocator,
+            logged_options.io,
             self.project_locator,
-            options.working_directory,
-            options.extraction,
-            options.clear_cache,
+            logged_options.working_directory,
+            logged_options.extraction,
+            logged_options.clear_cache,
             &diagnostics,
+            logged_options.logger,
         );
-        defer graph.deinit(options.allocator);
-        var labels = try self.projectLabels(options.allocator, &graph);
-        defer labels.deinit(options.allocator);
-        var edges = try self.projectEdges(options.allocator, &graph);
-        defer edges.deinit(options.allocator);
-        return plantuml.exportPlantUml(
-            options.allocator,
-            options.io,
+        defer graph.deinit(logged_options.allocator);
+        var labels = try self.projectLabels(logged_options.allocator, &graph);
+        defer labels.deinit(logged_options.allocator);
+        var edges = try self.projectEdges(logged_options.allocator, &graph);
+        defer edges.deinit(logged_options.allocator);
+        try plantuml.exportPlantUml(
+            logged_options.allocator,
+            logged_options.io,
             labels.items(),
             edges.items(),
             output_path,
         );
+        if (logged_options.logger) |logger| try logger.logExport("plantuml", output_path);
     }
 
     fn description(self: *const ProjectSlices, allocator: Allocator) Allocator.Error![]u8 {
@@ -463,9 +474,16 @@ pub const DiagramAdherenceRule = struct {
         self: *const DiagramAdherenceRule,
         options: CheckOptions,
     ) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "slices.adhere_to_diagram", performCheck);
+    }
+
+    fn performCheck(
+        self: *const DiagramAdherenceRule,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.rule.scope.project_locator,
@@ -473,6 +491,7 @@ pub const DiagramAdherenceRule = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -588,9 +607,16 @@ pub const SliceDependencyRule = struct {
         self: *const SliceDependencyRule,
         options: CheckOptions,
     ) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "slices.dependency", performCheck);
+    }
+
+    fn performCheck(
+        self: *const SliceDependencyRule,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.rule.scope.project_locator,
@@ -598,6 +624,7 @@ pub const SliceDependencyRule = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -1062,7 +1089,16 @@ test "generated PlantUML is deterministic exported and strictly round-trip valid
     defer std.testing.allocator.free(output_path);
     var options = CheckOptions.init(std.testing.allocator, std.testing.io);
     options.clear_cache = true;
+    var log_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer log_output.deinit();
+    options.logging = .{ .level = .debug, .writer = &log_output.writer };
     try fixture.exportAsPlantUml(options, output_path);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[export] format=plantuml file=generated.puml",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, log_output.written(), root) == null);
     const exported = try std.Io.Dir.cwd().readFileAllocOptions(
         std.testing.io,
         output_path,

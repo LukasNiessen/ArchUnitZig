@@ -636,6 +636,10 @@ pub const FilesHaveNoCycles = struct {
     }
 
     pub fn check(self: *const FilesHaveNoCycles, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "files.have_no_cycles", performCheck);
+    }
+
+    fn performCheck(self: *const FilesHaveNoCycles, options: CheckOptions) anyerror!assertion.ViolationList {
         var graph = try extractRuleGraph(&self.rule, options);
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -717,6 +721,10 @@ pub const FilesMatchPattern = struct {
     }
 
     pub fn check(self: *const FilesMatchPattern, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "files.match_pattern", performCheck);
+    }
+
+    fn performCheck(self: *const FilesMatchPattern, options: CheckOptions) anyerror!assertion.ViolationList {
         var graph = try extractRuleGraph(&self.rule, options);
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -861,6 +869,10 @@ pub const FilesDependOn = struct {
     }
 
     pub fn check(self: *const FilesDependOn, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "files.depend_on_files", performCheck);
+    }
+
+    fn performCheck(self: *const FilesDependOn, options: CheckOptions) anyerror!assertion.ViolationList {
         var graph = try extractRuleGraph(&self.rule, options);
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -1109,6 +1121,10 @@ pub const FilesExternalModules = struct {
     }
 
     pub fn check(self: *const FilesExternalModules, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "files.depend_on_external_modules", performCheck);
+    }
+
+    fn performCheck(self: *const FilesExternalModules, options: CheckOptions) anyerror!assertion.ViolationList {
         var graph = try extractRuleGraph(&self.rule, options);
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -1202,6 +1218,11 @@ pub const FilesAdhereTo = struct {
     }
 
     pub fn check(self: *const FilesAdhereTo, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "files.adhere_to", performCheck);
+    }
+
+    fn performCheck(self: *const FilesAdhereTo, options: CheckOptions) anyerror!assertion.ViolationList {
+        if (options.logger) |logger| try logger.logExtraction("source inspection started");
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
         var project = try extraction.locateProject(
@@ -1225,6 +1246,7 @@ pub const FilesAdhereTo = struct {
         for (source_files.items()) |path| {
             if (try self.rule.scope.matchesPath(path)) selected_count += 1;
         }
+        if (options.logger) |logger| try logger.logExtraction("source inspection completed");
         if (try guardRuleSelection(&self.rule, selected_count, options, "files.adhere_to")) |early| return early;
 
         var result = assertion.ViolationList{};
@@ -1340,7 +1362,7 @@ fn containsNonWhitespace(value: []const u8) bool {
 fn extractRuleGraph(rule: *const FileRuleContext, options: CheckOptions) anyerror!Graph {
     var diagnostics = common_error.ErrorContext.init(options.allocator);
     defer diagnostics.deinit();
-    return extraction.extractProjectGraph(
+    return extraction.extractProjectGraphLogged(
         options.allocator,
         options.io,
         rule.scope.projectLocator(),
@@ -1348,6 +1370,7 @@ fn extractRuleGraph(rule: *const FileRuleContext, options: CheckOptions) anyerro
         options.extraction,
         options.clear_cache,
         &diagnostics,
+        options.logger,
     );
 }
 
@@ -1856,6 +1879,42 @@ test "matching predicates run through extraction and treat root files as folder 
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expect(result.passes());
+}
+
+test "direct and erased terminals log one lifecycle with extraction cache and violation events" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var root_scope = try entry.inFile(&.{"root.zig"});
+    defer root_scope.deinit();
+    var positive = try root_scope.should();
+    defer positive.deinit();
+    var terminal = try positive.haveName(.{ .glob = "missing.zig" });
+    var terminal_owned = true;
+    defer if (terminal_owned) terminal.deinit(std.testing.allocator);
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.logging = .{ .level = .debug, .writer = &output.writer };
+
+    var direct = try terminal.check(options);
+    defer direct.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), direct.items().len);
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    terminal_owned = false;
+    defer erased.deinit();
+    var through_erasure = try erased.check(options);
+    defer through_erasure.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), through_erasure.items().len);
+
+    const text = output.written();
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, text, "[start_check]"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, text, "[end_check]"));
+    try std.testing.expect(std.mem.indexOf(u8, text, "[extraction] project graph extraction started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "[cache] cache cleared") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "[cache] cache miss") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "[violation] kind=matching") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "rule=files.match_pattern violations=1") != null);
 }
 
 fn expectEmptyMatchingRule(

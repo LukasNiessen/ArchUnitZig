@@ -205,6 +205,49 @@ golden output. Reports include only metrics ArchUnitZig actually calculates; abs
 concepts are not rendered as zero-valued placeholders. See
 [D042](docs/decisions.md#d042--metrics-reports-serialize-owned-zig-native-data).
 
+## Explicit per-check logging
+
+Logging is disabled unless the caller supplies at least one sink through `CheckOptions.logging`.
+An ordinary Zig writer is enough for captured test output:
+
+```zig
+var log_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+defer log_output.deinit();
+
+var check_options = archunit.CheckOptions.init(std.testing.allocator, std.testing.io);
+check_options.logging = .{
+    .level = .debug,
+    .writer = &log_output.writer,
+};
+var violations = try rule.check(check_options);
+defer violations.deinit(std.testing.allocator);
+```
+
+Levels are `debug`, `info`, `warn`, and `.@"error"` (escaped because `error` is a Zig keyword).
+The default `info` level reports check lifecycle, extraction, and export events; `warn` reports
+violations, while cache and metric details are `debug`. Progress, violation, and metric event
+families can also be disabled independently.
+
+For structured integrations, use a borrowed `LogSink`; for files, configure only the explicit I/O
+context and destination:
+
+```zig
+check_options.logging = .{
+    .file = .{
+        .output_directory = "zig-out/architecture/logs",
+        .name_prefix = "architecture",
+        .mode = .append,
+    },
+};
+```
+
+File sinks create the directory and use UTC nanosecond names such as
+`architecture-2026-08-11_10-11-12-123456789.log`. Writer, structured, and file sinks may be
+combined; prefixes use portable ASCII letters, digits, `.`, `_`, and `-`. Their configuration is
+borrowed for one operation, logging errors propagate, and no process-global logger or implicit
+stdout/stderr writer exists. See
+[D044](docs/decisions.md#d044--logging-is-explicit-borrowed-and-operation-local).
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.
