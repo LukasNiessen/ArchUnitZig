@@ -43,3 +43,6 @@ Exit criterion: the core sibling product surface exists where it has an honest Z
 
 Exit criterion: a pinned release archive/hash installs in a fresh Zig 0.16 consumer and its complete
 quality suite is green on supported operating systems.
+
+The roadmap culminates in the immutable `v0.0.1` preview. Later work is tracked by new issues and
+versions rather than silently expanding this completed delivery backlog.

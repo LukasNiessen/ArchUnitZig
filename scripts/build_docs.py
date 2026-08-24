@@ -124,7 +124,7 @@ def render_page(root: Path, config: dict, page: dict, next_page: dict | None) ->
       </ul>
     </nav>
     <main class="content" id="main-content">
-      <p class="eyebrow">Zig 0.16 · pre-release</p>
+      <p class="eyebrow">Zig 0.16 · v0.0.1 preview</p>
       {fragment}
       {next_link}
     </main>

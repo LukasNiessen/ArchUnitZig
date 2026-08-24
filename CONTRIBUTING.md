@@ -23,8 +23,9 @@ the repository documentation records decisions that outlive an individual ticket
    Documentation, public API, CI installer, and release-oriented changes also run:
 
    ```console
-   python -B -m unittest scripts.test_install_zig
+   python -B -m unittest scripts.test_install_zig scripts.test_release
    python -B scripts/check_ci.py
+   python -B scripts/release.py validate
    zig build test -Doptimize=ReleaseSafe
    zig build docs -Doptimize=ReleaseSafe
    zig build benchmark-check
@@ -75,6 +76,13 @@ checks both the published byte size and SHA-256 before extraction. External work
 pinned to immutable commits with their reviewed release tag in a comment. CI deliberately uses no
 dependency or build cache; adding one requires a key containing the Zig version and all relevant ZON
 hash/lock inputs.
+
+Version tags are annotated and never moved or reused. A `v*.*.*` tag runs the complete matrix again,
+then a fresh external project fetches the public archive and verified Zig content hash before the
+workflow publishes a GitHub prerelease. Workflow permissions default to `contents: read`; only the
+final publish job receives `contents: write`. Enable GitHub immutable releases before pushing a tag.
+If a release is defective, fix forward with a new version and let consumers restore a previously
+reviewed URL/hash pair; never rewrite published evidence.
 
 Performance work starts with evidence. `zig build benchmark` generates the versioned fixture and
 writes `zig-out/benchmark/results.json`; `zig build benchmark-check` also enforces the broad budgets

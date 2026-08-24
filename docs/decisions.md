@@ -1324,3 +1324,30 @@ Consequence: monorepos can analyze one package, a reviewed set, or all manifest 
 relative paths remain distinct; local module edges and `root` keep compilation context; dependency
 caches stay outside discovery; and workspace topology changes cannot reuse a stale single-package or
 multi-package cache entry.
+
+### D053 — Preview releases are tag-driven, immutable, and externally consumed
+
+The first release is `v0.0.1`, matching `build.zig.zon` version `0.0.1` and the exact Zig 0.16.0
+minimum. A tag-push workflow repeats the complete Debug matrix on Linux, Windows, and macOS, then
+runs ReleaseSafe formatting, tests, docs, and hosted performance budgets. Only after those jobs pass
+does a Linux job fetch the public tag archive into a newly generated consumer, verify Zig's package
+content hash, wire the public module through `b.dependency`, and execute a real architecture test.
+
+Workflow permissions default to `contents: read`. Only the final publish job receives
+`contents: write`; it creates a prerelease from the already-pushed annotated tag and reviewed notes.
+External actions remain commit-SHA pinned. GitHub immutable releases are enabled before tagging, so
+publishing locks the release assets and tag. A failed validation job publishes nothing.
+
+Zig's hash is a canonical content identity after applying `build.zig.zon.paths`, not a checksum of
+GitHub's transport archive. The version-specific JSON and Markdown release records intentionally
+live under `release/`, outside `.paths`; they can contain the final package hash without changing the
+hash they document. Included package metadata comprises the manifest, MIT license, README,
+changelog, contribution guidance, third-party notices, sources, tests, benchmarks, and design docs.
+
+Rollback never moves or reuses `v0.0.1`. Consumers restore the prior URL/hash pair in their
+manifest; maintainers fix forward under a new semantic version. The immutable release may be marked
+superseded in prose, but its tag, archive identity, and assets remain historical evidence.
+
+Consequence: every published preview is gated by the same suite as `main`, consumers prove the real
+network package-manager path, credentials exist only where publication requires them, and rollback
+does not undermine reproducibility.

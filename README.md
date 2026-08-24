@@ -6,18 +6,19 @@ ArchUnitZig turns a Zig project into a dependency graph and lets you enforce arc
 ordinary `zig test` tests. Rules are lazy values: constructing a fluent chain performs no I/O;
 checking it returns structured violations or integrates with Zig's test runner.
 
-The current package targets Zig 0.16.0 and is pre-release. Its public surface ships file rules,
+The `v0.0.1` preview targets exactly Zig 0.16.0. Its public surface ships file rules,
 named layers, slices and PlantUML diagrams, Zig-native metrics, graph reports, native test helpers,
 explicit per-check logging, and low-level extraction/projection data.
 
 ## Install
 
-Until the first tagged release, Zig's package manager can track `main`. For a reproducible build,
-replace `main` with a reviewed commit hash; after releases begin, prefer a release tag.
+Use the immutable `v0.0.1` archive rather than a mutable branch. The canonical Zig package hash,
+copy-paste `build.zig.zon` dependency, release limitations, and rollback procedure are recorded in
+the [version-specific release record](release/v0.0.1.md).
 
 <!-- readme-test:install -->
 ```console
-zig fetch --save=archunit git+https://github.com/LukasNiessen/ArchUnitZig.git#main
+zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.1.tar.gz
 ```
 
 The explicit `--save=archunit` name is the key used by `b.dependency` below. Add an architecture
@@ -357,7 +358,7 @@ resolved package identities, canonical paths, manifest fingerprints, and ignore 
 | Area | Current contract |
 | --- | --- |
 | Zig version | Exactly Zig 0.16.x APIs are targeted; other Zig versions are not supported until explicitly tested. |
-| Releases | The package is pre-release and has no stable compatibility guarantee yet; pin a commit rather than mutable `main` in production. |
+| Releases | `v0.0.1` is an immutable preview, not a stable compatibility promise; pin its archive URL and package hash. |
 | Build discovery | ArchUnitZig does not execute or claim to understand arbitrary `build.zig`; named modules need explicit compilation-unit mappings. |
 | Dynamic dependencies | Only literal `@import`, `@embedFile`, and `@cInclude` operands are dependency facts. Non-literal operands are parser diagnostics, not guessed names. |
 | Package internals | Package-origin modules remain external. ArchUnitZig does not recursively analyze fetched dependency source as part of the current project. |
