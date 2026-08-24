@@ -1,6 +1,12 @@
 const matching = @import("../../common/matching.zig");
 
 pub const Pattern = matching.Pattern;
+pub const PatternTarget = matching.PatternTarget;
+
+pub const PatternExclusion = struct {
+    pattern: Pattern,
+    target: PatternTarget,
+};
 
 pub const FocusQuery = struct {
     pattern: Pattern,
@@ -25,8 +31,11 @@ pub const GraphQueryOptions = struct {
     include_external_dependencies: bool = false,
     include_self_dependencies: bool = false,
     focus: ?FocusQuery = null,
+    focus_exclusions: []const PatternExclusion = &.{},
     reachable_from: ?Pattern = null,
+    reachable_from_exclusions: []const PatternExclusion = &.{},
     dependents_of: ?Pattern = null,
+    dependents_of_exclusions: []const PatternExclusion = &.{},
     collapse: ?CollapseQuery = null,
     title: []const u8 = "Project dependency graph",
 };

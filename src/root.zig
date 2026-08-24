@@ -67,6 +67,7 @@ pub const GraphReportSummary = graph_reports.GraphReportSummary;
 pub const CollapseQuery = graph_reports.CollapseQuery;
 pub const FocusQuery = graph_reports.FocusQuery;
 pub const GraphQueryOptions = graph_reports.GraphQueryOptions;
+pub const GraphPatternExclusion = graph_reports.GraphPatternExclusion;
 pub const PatternCollapse = graph_reports.PatternCollapse;
 pub const GraphNodeSelection = graph_reports.NodeSelection;
 pub const GraphSnapshotError = graph_reports.GraphSnapshotError;

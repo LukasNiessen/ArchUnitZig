@@ -14,6 +14,7 @@ pub const GraphReportSnapshot = report.GraphReportSnapshot;
 pub const CollapseQuery = query_options.CollapseQuery;
 pub const FocusQuery = query_options.FocusQuery;
 pub const GraphQueryOptions = query_options.GraphQueryOptions;
+pub const GraphPatternExclusion = query_options.PatternExclusion;
 pub const PatternCollapse = query_options.PatternCollapse;
 pub const NodeSelection = node_selection.NodeSelection;
 pub const selectGraphNodes = node_selection.selectNodes;
