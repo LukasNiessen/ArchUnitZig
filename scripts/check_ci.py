@@ -45,6 +45,7 @@ def main() -> None:
         "zig build benchmark-check",
         "name: performance-results",
         "path: zig-out/benchmark/results.json",
+        "if: always() && hashFiles('zig-out/benchmark/results.json') != ''",
         "pages: write",
         "id-token: write",
         "enablement: true",

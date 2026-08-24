@@ -398,16 +398,18 @@ fn runBenchmark(
             ended,
             window,
         );
-        if (!first_violations.passes()) return error.BenchmarkRuleViolation;
+        const first_check_passed = first_violations.passes();
         first_violations.deinit(allocator);
+        if (!first_check_passed) return error.BenchmarkRuleViolation;
 
         options.clear_cache = false;
         window = tracker.beginWindow();
         started = benchmarkTime(io);
         for (0..cached_iterations) |_| {
             var violations = try rule.check(options);
-            if (!violations.passes()) return error.BenchmarkRuleViolation;
+            const passed = violations.passes();
             violations.deinit(allocator);
+            if (!passed) return error.BenchmarkRuleViolation;
         }
         ended = benchmarkTime(io);
         measurements[@intFromEnum(Stage.cached_checks)] = makeMeasurement(
