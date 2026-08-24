@@ -234,6 +234,19 @@ vtable preserves an owned-description operation as well as `check`, so violation
 rules retain the correct sentence in one sorted report. Handles remain caller-owned, checks run in
 order, and the first analysis error discards all partial violation and description storage.
 
+Structural metrics cross a second Zig AST boundary because the dependency graph deliberately does
+not retain declaration trees or source spans. `MetricProjectInfo` owns sorted file facts and named
+declaration facts. File counts describe immediate root members; declaration-bound container counts
+describe immediate members; line, token, import, anonymous-container, and block-statement facts
+describe the complete lexical subject span. `MetricAnalysis` owns the extracted project and exposes
+a deterministic borrowed view selected at file, declaration, or container level.
+
+`metrics` scopes are lazy allocator-bound values using the shared path and declaration-name pattern
+semantics. Count selections produce owned measurements, summaries aggregate the selected structural
+facts, and threshold terminals emit the shared structured `metric` violation. Numeric evidence keeps
+signed integers, unsigned integers, and floating-point values tagged rather than routing counts
+through `f64`. Class/interface vocabulary and class-level LCOM do not exist in this model.
+
 Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
 identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and
