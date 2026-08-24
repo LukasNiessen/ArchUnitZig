@@ -120,6 +120,7 @@ def validate(root: Path, metadata_path: Path, expected_tag: str | None = None) -
         "--draft",
         "gh release edit",
         "--draft=false",
+        "gh release verify",
     ):
         require(workflow, value, errors, ".github/workflows/release.yml")
     if "continue-on-error" in workflow:

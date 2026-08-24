@@ -79,6 +79,7 @@ def main() -> None:
         "contents: write",
         "gh release create",
         "gh release edit",
+        "gh release verify",
     ):
         require(release_source, value, errors)
     if "continue-on-error" in release_source:

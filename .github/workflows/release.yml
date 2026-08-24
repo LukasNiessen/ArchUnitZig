@@ -137,11 +137,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require immutable releases and an annotated tag
+      - name: Require an annotated tag
         shell: bash
-        run: |
-          test "$(gh api repos/${{ github.repository }}/immutable-releases --jq .enabled)" = "true"
-          test "$(git cat-file -t "${{ github.ref_name }}")" = "tag"
+        run: test "$(git cat-file -t "${{ github.ref_name }}")" = "tag"
 
       - name: Create reviewed draft with release metadata asset
         run: >-
@@ -154,4 +152,6 @@ jobs:
           --notes-file "release/${{ github.ref_name }}.md"
 
       - name: Publish and lock release
-        run: gh release edit "${{ github.ref_name }}" --draft=false --prerelease
+        run: >-
+          gh release edit "${{ github.ref_name }}" --draft=false --prerelease
+          && gh release verify "${{ github.ref_name }}"
