@@ -4,6 +4,7 @@ const archunit = @import("archunit");
 const Allocator = std.mem.Allocator;
 const clean_root = "test/fixtures/acceptance projects/clean";
 const violating_root = "test/fixtures/acceptance projects/violating";
+const archignore_root = "test/fixtures/archignore";
 const analysis_exclusions = [_][]const u8{"testdata/**"};
 
 const app_modules = [_]archunit.ModuleOverride{
@@ -295,4 +296,76 @@ test "malformed source is an exact strict error and a permissive owned graph nod
         "testdata/malformed/broken.zig",
         "testdata/malformed/broken.zig",
     ) != null);
+}
+
+test "public enumeration and extraction honor the root archignore fixture" {
+    var diagnostics = archunit.ErrorContext.init(std.testing.allocator);
+    defer diagnostics.deinit();
+    var files = try archunit.enumerateSourceFiles(
+        std.testing.allocator,
+        std.testing.io,
+        archignore_root,
+        .{ .exclusions = &.{"testdata/**"} },
+        &diagnostics,
+    );
+    defer files.deinit(std.testing.allocator);
+    const expected = [_][]const u8{
+        "build.zig.zon",
+        "nested/hidden/kept.zig",
+        "nested/src/autogen/kept.zig",
+        "src/domain/model.zig",
+        "src/main.zig",
+    };
+    try std.testing.expectEqual(expected.len, files.items().len);
+    for (expected, files.items()) |wanted, actual| {
+        try std.testing.expectEqualStrings(wanted, actual);
+    }
+
+    var graph = try archunit.extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        ".",
+        archignore_root,
+        .{ .exclusions = &.{"testdata/**"} },
+        true,
+        &diagnostics,
+    );
+    defer graph.deinit(std.testing.allocator);
+    try std.testing.expect(graph.find("src/main.zig", "src/domain/model.zig") != null);
+    try std.testing.expect(graph.find("src/autogen/client.zig", "src/domain/model.zig") == null);
+}
+
+test "CheckOptions exclusions add to archignore with a live negative control" {
+    var project = try archunit.files(std.testing.allocator, .{});
+    defer project.deinit();
+    var ignored_sources = try project.inPath(&.{
+        .{ .glob = "src/autogen/**" },
+        .{ .glob = "testdata/**" },
+    });
+    defer ignored_sources.deinit();
+    var negative = try ignored_sources.shouldNot();
+    defer negative.deinit();
+    var dependencies = try negative.dependOnFiles();
+    defer dependencies.deinit();
+    var rule = try dependencies.inPath(&.{.{ .glob = "src/domain/**" }});
+    defer rule.deinit(std.testing.allocator);
+
+    var file_only = archunit.CheckOptions.init(std.testing.allocator, std.testing.io);
+    file_only.working_directory = archignore_root;
+    file_only.clear_cache = true;
+    var control = try rule.check(file_only);
+    defer control.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), control.items().len);
+    try std.testing.expectEqualStrings(
+        "testdata/excluded_by_options.zig",
+        control.items()[0].file_dependency.items()[0].source_label,
+    );
+
+    var composed = file_only;
+    composed.clear_cache = false;
+    composed.allow_empty_tests = true;
+    composed.extraction.exclusions = &.{"testdata/**"};
+    var result = try rule.check(composed);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
 }

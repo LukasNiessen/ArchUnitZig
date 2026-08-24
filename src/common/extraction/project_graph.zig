@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const archignore = @import("archignore.zig");
 const classifier = @import("classifier.zig");
 const common_error = @import("../error.zig");
 const extraction_options = @import("extraction_options.zig");
@@ -95,16 +96,19 @@ fn extractProjectGraphObserved(
         diagnostics,
     );
     defer project.deinit(allocator);
+    var root_policy = try archignore.load(allocator, io, project.path, diagnostics);
+    defer root_policy.deinit(allocator);
 
     if (clear_cache) {
         graph_cache.clearGraphCache();
         try logger.logCache("cache cleared");
     }
-    var cache_key = try graph_cache.buildGraphCacheKey(
+    var cache_key = try graph_cache.buildGraphCacheKeyWithArchIgnore(
         allocator,
         io,
         project.path,
         options,
+        &root_policy,
         diagnostics,
     );
     defer cache_key.deinit(allocator);
@@ -117,7 +121,14 @@ fn extractProjectGraphObserved(
     }
     try logger.logCache("cache miss");
 
-    var graph = try extractLocatedGraph(allocator, io, project.path, options, diagnostics);
+    var graph = try extractLocatedGraph(
+        allocator,
+        io,
+        project.path,
+        options,
+        &root_policy,
+        diagnostics,
+    );
     errdefer graph.deinit(allocator);
     graph_cache.storeGraphInCache(cache_key, graph) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_put", project.path, error.OutOfMemory);
@@ -136,13 +147,15 @@ fn extractLocatedGraph(
     io: Io,
     project_root: []const u8,
     options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!Graph {
-    var files = try source_files.enumerateSourceFiles(
+    var files = try source_files.enumerateSourceFilesWithArchIgnore(
         allocator,
         io,
         project_root,
         .{ .exclusions = options.exclusions },
+        root_policy,
         diagnostics,
     );
     defer files.deinit(allocator);
@@ -332,6 +345,59 @@ test "project graph extracts real relative imports and returns independent cache
     try std.testing.expect(first.find("src/api/handler.zig", "src/domain/order.zig") != null);
     try std.testing.expect(first.items().ptr != second.items().ptr);
     try std.testing.expect(first.items()[0].source.ptr != second.items()[0].source.ptr);
+}
+
+test "editing root archignore invalidates cached extraction without an explicit clear" {
+    graph_cache.clearGraphCache();
+    defer graph_cache.clearGraphCache();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .name = .fixture, .version = \"0.0.0\", .fingerprint = 0x2222222222222222 }",
+    });
+    try tmp.dir.createDirPath(std.testing.io, "src");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "src/generated.zig",
+        .data = "const kept = @import(\"kept.zig\");\n",
+    });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/kept.zig", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "generated.zig\n",
+    });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    var diagnostics = common_error.ErrorContext.init(std.testing.allocator);
+    defer diagnostics.deinit();
+
+    var ignored = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{},
+        false,
+        &diagnostics,
+    );
+    defer ignored.deinit(std.testing.allocator);
+    try std.testing.expect(ignored.find("src/generated.zig", "src/kept.zig") == null);
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "other.zig\n",
+    });
+    var included = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{},
+        false,
+        &diagnostics,
+    );
+    defer included.deinit(std.testing.allocator);
+    try std.testing.expect(included.find("src/generated.zig", "src/kept.zig") != null);
 }
 
 test "multiple compilation units are assigned only at exact roots" {

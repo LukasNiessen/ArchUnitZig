@@ -8,7 +8,7 @@
 <p>The extractor records literal <code>@import</code>, <code>@embedFile</code>, and supported C-import forms. A computed dependency operand is a parser-policy error in strict mode because static analysis cannot name its target without execution.</p>
 
 <h2 id="filesystem">Traversal is deliberately conservative</h2>
-<p>Symlinks and Windows reparse points are not followed. Nested marked Zig projects are traversal boundaries by default. Existing relative targets are canonicalized against the project root, and paths leaving that root remain external/outside rather than being silently folded into the project graph.</p>
+<p>Symlinks and Windows reparse points are not followed. Nested marked Zig projects are traversal boundaries by default, and nested <code>.archignore</code> files do not alter the located root's policy. Existing relative targets are canonicalized against the project root, and paths leaving that root remain external/outside rather than being silently folded into the project graph.</p>
 
 <h2 id="language-metrics">No class-oriented metrics</h2>
 <p>There is no class/interface rule surface, inheritance policy, LCOM, abstractness, distance-from-main-sequence, or zone label. Zig declarations, containers, source structure, imports, graph coupling, and user-defined metrics are the supported vocabulary.</p>

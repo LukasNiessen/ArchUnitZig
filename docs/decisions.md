@@ -1248,3 +1248,38 @@ headroom. CI uploads the raw JSON so future optimisation begins from comparable 
 Consequence: correctness and cache isolation cannot be traded for a faster number; performance
 regressions are visible by stage; allocations can be profiled without platform-specific tooling;
 and budget changes remain auditable against hosted evidence rather than one workstation.
+
+### D051 — `.archignore` reuses one exclusion language
+
+The optional project-root `.archignore` uses ArchUnitZig's existing glob language. A pattern without
+a path separator selects a basename at any depth; a pattern containing `/` or `\` selects a complete
+project-relative path; a leading `/` anchors an otherwise basename-shaped pattern at the project
+root; and a trailing separator selects a directory for traversal pruning. `*`, `**`, `?`, and
+character classes retain the same case-sensitive behavior as programmatic extraction exclusions.
+This is deliberately not advertised as gitignore compatibility.
+
+Surrounding spaces, tabs, and carriage returns are trimmed around each physical line. Empty lines
+and lines whose first remaining byte is `#` are ignored. `#` elsewhere is literal. Negation is not
+supported because re-inclusion would conflict with selective traversal and the promise that built-in
+cache, VCS, output, documentation, and dependency boundaries are never entered. A first
+non-whitespace `!`, an empty rooted pattern,
+`.` or `..` path segments, NUL bytes, and invalid ArchUnit globs are user-facing `InvalidPattern`
+errors with a `project.parse_archignore` diagnostic. Failing closed avoids accepting policy text
+with semantics borrowed accidentally from another ignore language.
+
+Exactly one file is authoritative: `.archignore` beside the located root marker. Nested files are
+ordinary non-analyzable files and have no policy effect. Its patterns, explicit
+`ExtractionOptions.exclusions`, and built-in exclusions form an additive union; none can re-include
+another source's exclusion. The loaded root policy is owned for one extraction and shared by cache-
+key construction and enumeration, avoiding a read-key/read-scan race inside one operation.
+
+The graph-cache key encodes the normalized absolute `.archignore` path, an explicit present/absent
+byte, and a SHA-256 fingerprint of the exact file bytes. Thus missing and empty files differ, and
+comments or line-ending edits conservatively invalidate the graph even when their effective pattern
+set is unchanged. Direct source enumeration loads the same root policy, so the public low-level API
+and fluent graph extraction cannot disagree.
+
+Consequence: repositories can keep generated or vendored source out of every architecture corpus
+without repeating options in each test; configuration errors are visible; Windows-authored patterns
+stay portable; nested projects cannot silently override their parent's scan; and cached graphs never
+outlive the exact root policy bytes that selected their source files.

@@ -202,14 +202,19 @@ Project discovery canonicalises an explicit directory/marker or searches upward 
 excluded directories are never opened recursively. Symlink/reparse entries are not followed, and a
 nested marked Zig project is a traversal boundary by default. The owned result contains sorted,
 project-relative `/` paths for lowercase `.zig` and `.zon` files; custom exclusion globs are additive
-to the documented cache, VCS, output, documentation, and dependency defaults.
+to the documented cache, VCS, output, documentation, and dependency defaults. An optional
+project-root `.archignore` supplies a second additive list in the same ArchUnit glob grammar. Only
+blank lines and full-line `#` comments are metadata; negation is deliberately unsupported, and
+nested `.archignore` files do not alter the root policy.
 
 Extraction settings live in one `ExtractionOptions` value: exclusions, parser strictness,
 resource/C-header toggles, explicit compilation-unit mappings, and build-graph mode. Graph-cache
-keys use the canonical project root plus a length-delimited encoding of every field. A schema test
-reflects over the options and nested module-mapping structs, so adding a field without acknowledging
-it in key construction fails the suite. Slice order is significant; this may conservatively miss an
-equivalent hit but cannot return a graph produced for different input.
+keys use the canonical project root plus a length-delimited encoding of every field. They also encode
+the normalized root `.archignore` path, whether the file exists, and the SHA-256 fingerprint of its
+exact bytes. A schema test reflects over the options and nested module-mapping structs, so adding a
+field without acknowledging it in key construction fails the suite. Slice order is significant;
+this may conservatively miss an equivalent hit but cannot return a graph produced for different
+input.
 
 `GraphCache` instances own cloned keys and graphs and are deliberately not synchronized. Reads also
 return clones, so clearing or destroying a cache never invalidates a caller's graph. The process-wide

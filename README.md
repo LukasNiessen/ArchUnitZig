@@ -318,6 +318,20 @@ module alias table. Multiple roots may map the same alias differently. Unknown a
 silently disappear. Strict parsing rejects malformed source and non-literal operands; permissive
 parsing returns owned syntax diagnostics and no partial edges from a rejected file.
 
+### Project-level `.archignore`
+
+An optional `.archignore` at the located project root adds exclusions to every architecture scan.
+It uses the same case-sensitive ArchUnit glob syntax as `ExtractionOptions.exclusions`: `*` stays
+within one path segment, `**` crosses segments, `/pattern` is rooted, a pattern without a separator
+matches a basename at any depth, and `\` is accepted as a path separator. Blank lines and full-line
+`#` comments are ignored. Inline comments and gitignore negation are not supported; a line beginning
+with `!` fails with `InvalidPattern` instead of silently behaving like a different language.
+
+Only the root file is read. Nested `.archignore` files have no effect, and all three exclusion
+sources are additive: the file cannot re-include a built-in cache/vendor/output directory or a path
+excluded explicitly through `CheckOptions`. The cache identity includes the normalized root-file
+path, its presence, and a SHA-256 fingerprint of its exact bytes, so edits invalidate cached graphs.
+
 ## Limitations
 
 | Area | Current contract |
@@ -330,7 +344,7 @@ parsing returns owned syntax diagnostics and no partial edges from a rejected fi
 | Language model | There are no class/interface rules, LCOM, abstractness, main-sequence distance, or class-oriented zone metrics. |
 | Visibility | Zig declaration visibility is not treated as abstractness or an architecture layer. |
 | Slice vocabulary | Only the projection, dependency, PlantUML, and export methods documented above are shipped; sibling-only slice methods are not implied. |
-| Filesystem traversal | Symlinks/reparse points are not followed, nested marked Zig projects are boundaries, and cache/VCS/output/docs/dependency trees are excluded by default. |
+| Filesystem traversal | Symlinks/reparse points are not followed, nested marked Zig projects are boundaries, cache/VCS/output/docs/dependency trees are excluded by default, and only the project-root `.archignore` is loaded. |
 | Concurrency | Graph cache instances are unsynchronized; the process-wide cache is mutex-protected, but caller-owned writers and sinks need their own coordination if shared. |
 
 ## Configuration and diagnostics

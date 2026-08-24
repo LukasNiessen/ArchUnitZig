@@ -1,0 +1,4 @@
+# Root-only ArchUnit glob policy.
+/src/autogen/
+third_party
+src\windows\**

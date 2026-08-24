@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const archignore = @import("archignore.zig");
 const common_error = @import("../error.zig");
 const common_path = @import("../path.zig");
 const extraction_options = @import("extraction_options.zig");
@@ -12,7 +13,7 @@ pub const BuildGraphMode = extraction_options.BuildGraphMode;
 pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const Graph = graph_module.Graph;
 
-const cache_key_schema_version: u64 = 2;
+const cache_key_schema_version: u64 = 3;
 const keyed_option_fields = [_][]const u8{
     "exclusions",
     "strictness",
@@ -53,31 +54,80 @@ pub fn buildGraphCacheKey(
     options: ExtractionOptions,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!GraphCacheKey {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    var root_policy = try archignore.load(allocator, io, canonical_root, diagnostics);
+    defer root_policy.deinit(allocator);
+    return buildCanonicalGraphCacheKey(
+        allocator,
+        canonical_root,
+        options,
+        &root_policy,
+        diagnostics,
+    );
+}
+
+/// Coherent extraction entry point: encodes the exact policy snapshot used by source enumeration.
+pub fn buildGraphCacheKeyWithArchIgnore(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!GraphCacheKey {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    return buildCanonicalGraphCacheKey(
+        allocator,
+        canonical_root,
+        options,
+        root_policy,
+        diagnostics,
+    );
+}
+
+fn canonicalProjectRoot(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError![:0]u8 {
     if (project_root.len == 0) {
         return diagnostics.failUser(.invalid_project_path, "graph_cache.build_key", project_root, null);
     }
     const canonical_root = std.Io.Dir.cwd().realPathFileAlloc(io, project_root, allocator) catch |failure| {
         return mapRootFailure(diagnostics, project_root, failure);
     };
-    defer allocator.free(canonical_root);
+    errdefer allocator.free(canonical_root);
     const root_stat = std.Io.Dir.cwd().statFile(io, canonical_root, .{}) catch |failure| {
         return mapRootFailure(diagnostics, project_root, failure);
     };
     if (root_stat.kind != .directory) {
         return diagnostics.failUser(.invalid_project_path, "graph_cache.build_key", project_root, error.NotDir);
     }
+    return canonical_root;
+}
+
+fn buildCanonicalGraphCacheKey(
+    allocator: Allocator,
+    canonical_root: []const u8,
+    options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!GraphCacheKey {
     const normalized_root = common_path.normalize(allocator, canonical_root) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     defer allocator.free(normalized_root);
 
     var encoded: std.ArrayList(u8) = .empty;
     errdefer encoded.deinit(allocator);
-    appendKey(allocator, &encoded, normalized_root, options) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+    appendKey(allocator, &encoded, normalized_root, options, root_policy) catch {
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     const bytes = encoded.toOwnedSlice(allocator) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     return .{ .bytes = bytes, .hash_value = std.hash.Wyhash.hash(0, bytes) };
 }
@@ -87,9 +137,13 @@ fn appendKey(
     encoded: *std.ArrayList(u8),
     canonical_root: []const u8,
     options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
 ) Allocator.Error!void {
     try appendU64(allocator, encoded, cache_key_schema_version);
     try appendString(allocator, encoded, canonical_root);
+    try appendString(allocator, encoded, root_policy.path);
+    try encoded.append(allocator, @intFromBool(root_policy.present));
+    try appendString(allocator, encoded, &root_policy.fingerprint);
     try appendU64(allocator, encoded, @intFromEnum(options.strictness));
     try encoded.append(allocator, @intFromBool(options.include_resources));
     try encoded.append(allocator, @intFromBool(options.include_c_imports));
@@ -301,6 +355,50 @@ test "canonical roots produce equal keys and every option separates keys" {
         defer variant.deinit(std.testing.allocator);
         try std.testing.expect(!baseline.eql(variant));
     }
+}
+
+test "cache keys encode root archignore path presence and exact content fingerprint" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var missing = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer missing.deinit(std.testing.allocator);
+    const joined_policy_path = try std.fs.path.join(std.testing.allocator, &.{ root, archignore.file_name });
+    defer std.testing.allocator.free(joined_policy_path);
+    const normalized_policy_path = try common_path.normalize(std.testing.allocator, joined_policy_path);
+    defer std.testing.allocator.free(normalized_policy_path);
+    try std.testing.expect(std.mem.indexOf(u8, missing.bytes, normalized_policy_path) != null);
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = archignore.file_name, .data = "" });
+    var empty = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer empty.deinit(std.testing.allocator);
+    try std.testing.expect(!missing.eql(empty));
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "# comment only\n",
+    });
+    var comment = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer comment.deinit(std.testing.allocator);
+    try std.testing.expect(!empty.eql(comment));
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "alpha/**\n",
+    });
+    var alpha = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer alpha.deinit(std.testing.allocator);
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "bravo/**\n",
+    });
+    var bravo = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer bravo.deinit(std.testing.allocator);
+    try std.testing.expect(!alpha.eql(bravo));
 }
 
 test "every compilation-unit and module mapping field separates cache keys" {
