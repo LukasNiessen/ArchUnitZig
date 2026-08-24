@@ -255,6 +255,15 @@ the full topology remains the normalization denominator. Resources and ZON depen
 not silently promoted to Zig source subjects. Abstractness and main-sequence distance have no Zig
 metric because visibility and opaque syntax do not establish abstract contracts.
 
+Custom metrics sit on a scalar-only callback boundary above structural and projected dependency
+analysis. Metric definitions own their name and description, while calculation/predicate contexts
+are explicitly borrowed. A callback sees stable identity slices for that invocation plus copied
+structural facts, copied dependency facts, and a contributing-file count; it never receives an AST,
+tokenizer buffer, or source buffer. File, declaration, and container builders reuse `MetricsScope`.
+Module and slice builders reuse the public edge mapper and require mapped internal self-edges to
+declare the complete projected subject universe. Measurements and violations clone all evidence
+that survives the callback.
+
 Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
 identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and

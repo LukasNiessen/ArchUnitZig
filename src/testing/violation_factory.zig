@@ -54,6 +54,7 @@ pub const ViolationFactory = struct {
         return switch (violation) {
             .cycle => |value| formatCycle(allocator, value, rule_sentence),
             .custom_file => |value| formatCustomFile(allocator, value, rule_sentence),
+            .custom_metric => |value| formatCustomMetric(allocator, value, rule_sentence),
             .empty_test => |value| formatEmptyTest(allocator, value, rule_sentence),
             .external_module_dependency => |value| formatExternalDependency(allocator, value, rule_sentence),
             .file_dependency => |value| formatFileDependency(allocator, value, rule_sentence),
@@ -119,6 +120,36 @@ fn formatMetric(
         return error.OutOfMemory;
     writeMetricValue(&output.writer, value.threshold) catch return error.OutOfMemory;
     return finish(allocator, "Metric threshold violation", "metric", value.target_identifier, &output);
+}
+
+fn formatCustomMetric(
+    allocator: Allocator,
+    value: assertion.CustomMetricViolation,
+    rule_sentence: []const u8,
+) FormatError!FormattedViolation {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeRule(&output.writer, rule_sentence) catch return error.OutOfMemory;
+    output.writer.print(
+        "\nTarget: {s} ({s})\nMetric: {s}\nDescription: {s}\nMeasured: ",
+        .{
+            value.target_identifier,
+            @tagName(value.target_kind),
+            value.metric_name,
+            value.metric_description,
+        },
+    ) catch return error.OutOfMemory;
+    writeMetricValue(&output.writer, value.measured) catch return error.OutOfMemory;
+    switch (value.expectation) {
+        .threshold => |expectation| {
+            output.writer.print("\nExpected: {s} ", .{metricComparisonPhrase(expectation.comparison)}) catch
+                return error.OutOfMemory;
+            writeMetricValue(&output.writer, expectation.threshold) catch return error.OutOfMemory;
+        },
+        .predicate => output.writer.writeAll("\nExpected: satisfy the custom metric assertion") catch
+            return error.OutOfMemory,
+    }
+    return finish(allocator, "Custom metric violation", "custom_metric", value.target_identifier, &output);
 }
 
 fn writeMetricValue(writer: *std.Io.Writer, value: assertion.MetricValue) std.Io.Writer.Error!void {
@@ -1051,6 +1082,61 @@ test "metric formatter preserves target value comparison and threshold" {
             "Expected: below or equal to 5",
         formatted.details,
     );
+}
+
+test "custom metric formatter preserves the user description and expectation kind" {
+    var threshold_payload = try assertion.CustomMetricViolation.initThreshold(
+        std.testing.allocator,
+        "domain",
+        .module,
+        "change_risk",
+        "weighted incoming and outgoing dependency risk",
+        .{ .floating = 0.75 },
+        .below,
+        .{ .floating = 0.5 },
+    );
+    var threshold_violation = assertion.Violation.fromCustomMetricMove(&threshold_payload);
+    defer threshold_violation.deinit(std.testing.allocator);
+    var threshold_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        threshold_violation,
+        "projected Zig modules custom metric change_risk should be below 0.5",
+    );
+    defer threshold_formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Custom metric violation", threshold_formatted.heading);
+    try std.testing.expectEqualStrings("custom_metric:domain", threshold_formatted.sort_key);
+    try std.testing.expectEqualStrings(
+        "Rule: projected Zig modules custom metric change_risk should be below 0.5\n" ++
+            "Target: domain (module)\n" ++
+            "Metric: change_risk\n" ++
+            "Description: weighted incoming and outgoing dependency risk\n" ++
+            "Measured: 0.75\n" ++
+            "Expected: below 0.5",
+        threshold_formatted.details,
+    );
+
+    var predicate_payload = try assertion.CustomMetricViolation.initPredicate(
+        std.testing.allocator,
+        "orders",
+        .slice,
+        "coherent_boundary",
+        "slice-specific coherence policy",
+        .{ .signed = -1 },
+    );
+    var predicate_violation = assertion.Violation.fromCustomMetricMove(&predicate_payload);
+    defer predicate_violation.deinit(std.testing.allocator);
+    var predicate_formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        predicate_violation,
+        "projected Zig slices custom metric coherent_boundary should satisfy its assertion",
+    );
+    defer predicate_formatted.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.endsWith(
+        u8,
+        predicate_formatted.details,
+        "Measured: -1\nExpected: satisfy the custom metric assertion",
+    ));
 }
 
 test "cycle formatter preserves traversal and renders each concrete import" {

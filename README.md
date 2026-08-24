@@ -116,6 +116,35 @@ so module and slice projections use the exact same math. Zig abstractness, main-
 and class-oriented zone rules are deliberately absent; [D039](docs/decisions.md#d039--dependency-metrics-count-distinct-projected-internal-neighbors)
 records the formulas and why visibility is not treated as abstractness.
 
+Project-specific metrics use an explicitly typed callback boundary:
+
+```zig
+fn risk(
+    _: std.mem.Allocator,
+    info: archunit.CustomMetricInfo,
+) !archunit.MetricValue {
+    const facts = info.structural orelse return error.MissingStructuralFacts;
+    return .{ .unsigned = @intCast(facts.tokens + facts.imports) };
+}
+
+var custom = try source.customMetric(
+    "token_import_risk",
+    "tokens plus direct imports",
+    archunit.CustomMetricCalculation.fromStateless(risk),
+);
+defer custom.deinit();
+var rule = try custom.shouldBeBelow(.{ .unsigned = 500 });
+defer rule.deinit(std.testing.allocator);
+```
+
+The same builder supports `shouldSatisfy`, whose callback receives the measured value and the same
+subject view. Context-backed calculations and predicates are available, but their context is
+borrowed and must outlive the builder and any derived rule. File, declaration, and container views
+come from the structural scope. `customMetricForProjection` accepts a caller-defined `MapFunction`
+for module or slice subjects; mapped internal self-edges define the complete label universe. See
+[D040](docs/decisions.md#d040--custom-metrics-cross-a-scalar-only-borrowed-callback-boundary) for
+the lifetime, projection, and numeric contracts.
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.
