@@ -9,6 +9,10 @@ pub const inspectSource = @import("metrics/extraction/structural.zig").inspectSo
 pub const ComparisonError = @import("metrics/assertion/threshold.zig").ComparisonError;
 pub const passesThreshold = @import("metrics/assertion/threshold.zig").passes;
 pub const CountMetric = @import("metrics/calculation/count.zig").CountMetric;
+pub const DependencyMetricInfo = @import("metrics/calculation/dependency.zig").DependencyMetricInfo;
+pub const DependencyMetricSnapshot = @import("metrics/calculation/dependency.zig").DependencyMetricSnapshot;
+pub const DependencyCalculationError = @import("metrics/calculation/dependency.zig").CalculationError;
+pub const calculateDependencyMetrics = @import("metrics/calculation/dependency.zig").calculateDependencyMetrics;
 pub const MetricBuilderError = @import("metrics/fluentapi/metrics.zig").BuilderError;
 pub const MetricProjectOptions = @import("metrics/fluentapi/metrics.zig").ProjectOptions;
 pub const MetricTargetLevel = @import("metrics/fluentapi/metrics.zig").TargetLevel;
@@ -26,6 +30,7 @@ pub const metrics = @import("metrics/fluentapi/metrics.zig").metrics;
 test {
     _ = @import("metrics/assertion/threshold.zig");
     _ = @import("metrics/calculation/count.zig");
+    _ = @import("metrics/calculation/dependency.zig");
     _ = @import("metrics/fluentapi/metrics.zig");
     _ = @import("metrics/extraction/structural.zig");
 }
