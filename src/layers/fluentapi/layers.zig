@@ -31,6 +31,7 @@ pub const LayeredArchitecture = struct {
     strict_unassigned_dependencies: bool = false,
     definitions: std.ArrayList(LayerDefinition) = .empty,
     policies: std.ArrayList(LayerPolicy) = .empty,
+    exclusion_definition_index: ?usize = null,
 
     fn init(allocator: Allocator, options: ProjectLayerOptions) BuilderError!LayeredArchitecture {
         if (options.locator) |locator| {
@@ -48,6 +49,7 @@ pub const LayeredArchitecture = struct {
             .allocator = self.allocator,
             .project_locator = if (self.project_locator) |locator| try self.allocator.dupe(u8, locator) else null,
             .strict_unassigned_dependencies = self.strict_unassigned_dependencies,
+            .exclusion_definition_index = self.exclusion_definition_index,
         };
         errdefer result.deinit(self.allocator);
         try result.definitions.ensureTotalCapacity(self.allocator, self.definitions.items.len);
@@ -181,6 +183,36 @@ pub const LayeredArchitecture = struct {
         return self.policies.items;
     }
 
+    pub fn except(
+        self: *const LayeredArchitecture,
+        patterns: []const Pattern,
+    ) BuilderError!LayeredArchitecture {
+        const index = self.exclusion_definition_index orelse return error.ExclusionWithoutSelector;
+        return self.excludeDefinition(index, patterns, self.definitions.items[index].inheritedTarget());
+    }
+
+    pub fn exceptTargeted(
+        self: *const LayeredArchitecture,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!LayeredArchitecture {
+        const index = self.exclusion_definition_index orelse return error.ExclusionWithoutSelector;
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        return self.excludeDefinition(index, patterns, target);
+    }
+
+    fn excludeDefinition(
+        self: *const LayeredArchitecture,
+        index: usize,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!LayeredArchitecture {
+        var result = try self.clone();
+        errdefer result.deinit(result.allocator);
+        try result.definitions.items[index].addExclusions(result.allocator, patterns, target);
+        return result;
+    }
+
     fn findDefinition(self: *const LayeredArchitecture, name: []const u8) ?*const LayerDefinition {
         for (self.definitions.items) |*definition| {
             if (std.mem.eql(u8, definition.name, name)) return definition;
@@ -250,6 +282,7 @@ pub const LayerDefinitionBuilder = struct {
             definition.deinit(result.allocator);
             return failure;
         };
+        result.exclusion_definition_index = result.definitions.items.len - 1;
         return result;
     }
 };
@@ -299,6 +332,7 @@ pub const LayerDependencyRuleBuilder = struct {
             policy.deinit(result.allocator);
             return failure;
         };
+        result.exclusion_definition_index = null;
         return result;
     }
 
@@ -396,6 +430,74 @@ test "layer and policy builders are branchable and validate names and references
     try std.testing.expectError(error.UnknownLayer, policy_stage.mayOnlyDependOnLayers(&.{"missing"}));
     try std.testing.expectError(error.DuplicateLayerTarget, policy_stage.mayOnlyDependOnLayers(&.{ "domain", "domain" }));
     try std.testing.expectError(error.EmptyBlocklist, policy_stage.mayNotDependOnLayers(&.{}));
+}
+
+test "layer exclusions attach to the latest definition and survive owned clones" {
+    var base = try projectLayers(std.testing.allocator, .{});
+    defer base.deinit(std.testing.allocator);
+    try std.testing.expectError(error.ExclusionWithoutSelector, base.except(&.{.{ .glob = "generated/**" }}));
+    var stage = try base.layer("application");
+    defer stage.deinit();
+    var broad = try stage.definedBy(.{ .glob = "src/**" });
+    defer broad.deinit(std.testing.allocator);
+    var no_generated = try broad.except(&.{.{ .glob = "src/**/generated/**" }});
+    defer no_generated.deinit(std.testing.allocator);
+    var no_tests = try no_generated.exceptTargeted(&.{.{ .regex = "_test\\.zig$" }}, .filename);
+    defer no_tests.deinit(std.testing.allocator);
+
+    const definition = &no_tests.definitionItems()[0];
+    try std.testing.expect(try definition.matches(std.testing.allocator, "src/domain/model.zig"));
+    try std.testing.expect(!try definition.matches(
+        std.testing.allocator,
+        "src/domain/generated/deep/model.zig",
+    ));
+    try std.testing.expect(!try definition.matches(std.testing.allocator, "src/domain/model_test.zig"));
+    try std.testing.expect(try broad.definitionItems()[0].matches(
+        std.testing.allocator,
+        "src/domain/model_test.zig",
+    ));
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        broad.exceptTargeted(&.{.{ .glob = "Legacy" }}, .declaration_name),
+    );
+    var evidence: std.ArrayList(assertion.ScopePattern) = .empty;
+    defer evidence.deinit(std.testing.allocator);
+    try definition.appendScopeEvidence(std.testing.allocator, &evidence);
+    try std.testing.expectEqual(@as(usize, 3), evidence.items.len);
+    try std.testing.expect(evidence.items[1].is_exclusion);
+
+    var policy_stage = try no_tests.whereLayer("application");
+    defer policy_stage.deinit();
+    var policy = try policy_stage.mayOnlyDependOnLayers(&.{});
+    defer policy.deinit(std.testing.allocator);
+    try std.testing.expectError(error.ExclusionWithoutSelector, policy.except(&.{.{ .glob = "late/**" }}));
+}
+
+test "layer fixture exclusions remove generated-style sources before assignment" {
+    var module_context = FixtureModuleContext{};
+    module_context.prepare();
+    var base = try projectLayers(std.testing.allocator, .{ .locator = "test/fixtures/layers-basic" });
+    defer base.deinit(std.testing.allocator);
+    var presentation_stage = try base.layer("presentation");
+    defer presentation_stage.deinit();
+    var presentation = try presentation_stage.definedByFolder(.{ .glob = "src/presentation" });
+    defer presentation.deinit(std.testing.allocator);
+    var infrastructure_stage = try presentation.layer("infrastructure");
+    defer infrastructure_stage.deinit();
+    var infrastructure = try infrastructure_stage.definedByFolder(.{ .glob = "src/infrastructure" });
+    defer infrastructure.deinit(std.testing.allocator);
+    var without_legacy = try infrastructure.exceptTargeted(&.{.{ .glob = "legacy.zig" }}, .filename);
+    defer without_legacy.deinit(std.testing.allocator);
+    var policy_stage = try without_legacy.whereLayer("infrastructure");
+    defer policy_stage.deinit();
+    var policy = try policy_stage.mayNotDependOnLayers(&.{"presentation"});
+    defer policy.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    options.extraction.module_resolution = module_context.options();
+    var result = try policy.check(options);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
 }
 
 test "fluent policy check applies blocklist precedence sealed layers and strict assignment" {
@@ -643,7 +745,9 @@ test "resolved application module alias participates as a located internal layer
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var architecture = try sampleArchitecture(allocator);
     defer architecture.deinit(allocator);
-    var policy_stage = try architecture.whereLayer("presentation");
+    var filtered = try architecture.exceptTargeted(&.{.{ .glob = "generated.zig" }}, .filename);
+    defer filtered.deinit(allocator);
+    var policy_stage = try filtered.whereLayer("presentation");
     defer policy_stage.deinit();
     var policy = try policy_stage.mayOnlyDependOnLayers(&.{"application"});
     defer policy.deinit(allocator);
