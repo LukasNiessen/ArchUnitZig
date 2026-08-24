@@ -15,7 +15,7 @@ pub const BuildGraphMode = extraction_options.BuildGraphMode;
 pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const Graph = graph_module.Graph;
 
-const cache_key_schema_version: u64 = 4;
+const cache_key_schema_version: u64 = 5;
 const keyed_option_fields = [_][]const u8{
     "exclusions",
     "workspace",
@@ -29,8 +29,8 @@ const keyed_option_fields = [_][]const u8{
 const keyed_workspace_fields = [_][]const u8{ "mode", "packages" };
 const keyed_workspace_package_fields = [_][]const u8{ "id", "path" };
 const keyed_module_resolution_fields = [_][]const u8{"compilation_units"};
-const keyed_compilation_unit_fields = [_][]const u8{ "id", "root_source_path", "modules" };
-const keyed_module_override_fields = [_][]const u8{ "name", "source_path", "origin" };
+const keyed_compilation_unit_fields = [_][]const u8{ "id", "package_id", "root_source_path", "modules" };
+const keyed_module_override_fields = [_][]const u8{ "name", "package_id", "source_path", "origin" };
 
 /// Owned canonical cache identity. Hashes accelerate lookup; equality always compares full bytes.
 pub const GraphCacheKey = struct {
@@ -232,6 +232,12 @@ fn appendKey(
     try appendU64(allocator, encoded, units.len);
     for (units) |unit| {
         try appendString(allocator, encoded, unit.id);
+        if (unit.package_id) |package_id| {
+            try encoded.append(allocator, 1);
+            try appendString(allocator, encoded, package_id);
+        } else {
+            try encoded.append(allocator, 0);
+        }
         if (unit.root_source_path) |root_source_path| {
             try encoded.append(allocator, 1);
             try appendString(allocator, encoded, root_source_path);
@@ -241,6 +247,12 @@ fn appendKey(
         try appendU64(allocator, encoded, unit.modules.len);
         for (unit.modules) |module| {
             try appendString(allocator, encoded, module.name);
+            if (module.package_id) |package_id| {
+                try encoded.append(allocator, 1);
+                try appendString(allocator, encoded, package_id);
+            } else {
+                try encoded.append(allocator, 0);
+            }
             try appendString(allocator, encoded, module.source_path);
             try appendU64(allocator, encoded, @intFromEnum(module.origin));
         }
@@ -530,28 +542,34 @@ test "every compilation-unit and module mapping field separates cache keys" {
 
     const Mapping = struct {
         unit_id: []const u8 = "app",
+        unit_package_id: ?[]const u8 = null,
         root_source_path: ?[]const u8 = "src/main.zig",
         module_name: []const u8 = "domain",
+        module_package_id: ?[]const u8 = null,
         module_source_path: []const u8 = "src/domain/root.zig",
         module_origin: module_resolver.ModuleOrigin = .project,
     };
     const baseline_mapping: Mapping = .{};
     const variants = [_]Mapping{
         .{ .unit_id = "tests" },
+        .{ .unit_package_id = "api" },
         .{ .root_source_path = null },
         .{ .root_source_path = "src/other.zig" },
         .{ .module_name = "application" },
+        .{ .module_package_id = "shared" },
         .{ .module_source_path = "src/application/root.zig" },
         .{ .module_origin = .package },
     };
 
     const baseline_modules = [_]module_resolver.ModuleOverride{.{
         .name = baseline_mapping.module_name,
+        .package_id = baseline_mapping.module_package_id,
         .source_path = baseline_mapping.module_source_path,
         .origin = baseline_mapping.module_origin,
     }};
     const baseline_units = [_]module_resolver.CompilationUnitOverride{.{
         .id = baseline_mapping.unit_id,
+        .package_id = baseline_mapping.unit_package_id,
         .root_source_path = baseline_mapping.root_source_path,
         .modules = &baseline_modules,
     }};
@@ -567,11 +585,13 @@ test "every compilation-unit and module mapping field separates cache keys" {
     for (variants) |mapping| {
         const modules = [_]module_resolver.ModuleOverride{.{
             .name = mapping.module_name,
+            .package_id = mapping.module_package_id,
             .source_path = mapping.module_source_path,
             .origin = mapping.module_origin,
         }};
         const units = [_]module_resolver.CompilationUnitOverride{.{
             .id = mapping.unit_id,
+            .package_id = mapping.unit_package_id,
             .root_source_path = mapping.root_source_path,
             .modules = &modules,
         }};
