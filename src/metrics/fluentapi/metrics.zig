@@ -12,6 +12,8 @@ const count_calculation = @import("../calculation/count.zig");
 const custom_calculation = @import("../calculation/custom.zig");
 const dependency_calculation = @import("../calculation/dependency.zig");
 const structural = @import("../extraction/structural.zig");
+const report_data = @import("../reporting/report_data.zig");
+const report_export = @import("../reporting/export_support.zig");
 
 const Allocator = std.mem.Allocator;
 pub const CheckOptions = fluentapi.CheckOptions;
@@ -597,6 +599,56 @@ pub const CountMetrics = struct {
         return result;
     }
 
+    pub fn gatherReportData(self: *const CountMetrics, options: CheckOptions) anyerror!report_data.MetricsReportData {
+        const summary_value = try self.summary(options);
+        const scope_description = try self.scope.description(options.allocator);
+        defer options.allocator.free(scope_description);
+        const title = try std.fmt.allocPrint(options.allocator, "Count metrics — {s}", .{scope_description});
+        defer options.allocator.free(title);
+        var section = try report_data.countSection(
+            options.allocator,
+            title,
+            summary_value.subject_count,
+            summary_value.invalid_syntax_subjects,
+            summary_value.totals,
+        );
+        var section_owned = true;
+        errdefer if (section_owned) section.deinit(options.allocator);
+        var data = report_data.MetricsReportData{};
+        errdefer data.deinit(options.allocator);
+        try data.appendSectionMove(options.allocator, &section);
+        section_owned = false;
+        data.sort();
+        return data;
+    }
+
+    pub fn toHtml(
+        self: *const CountMetrics,
+        options: CheckOptions,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror![]u8 {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+    }
+
+    pub fn exportAsHtml(
+        self: *const CountMetrics,
+        options: CheckOptions,
+        output_path: []const u8,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror!void {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.exportAsHtml(
+            options.allocator,
+            options.io,
+            &data,
+            output_path,
+            export_options,
+        );
+    }
+
     fn selection(self: *const CountMetrics, metric: CountMetric) BuilderError!CountMetricSelection {
         return .{ .scope = try self.scope.clone(), .metric = metric };
     }
@@ -843,6 +895,59 @@ pub const DependencyMetrics = struct {
             result.average_coupling_factor /= denominator;
         }
         return result;
+    }
+
+    pub fn gatherReportData(self: *const DependencyMetrics, options: CheckOptions) anyerror!report_data.MetricsReportData {
+        const summary_value = try self.summary(options);
+        const scope_description = try self.scope.description(options.allocator);
+        defer options.allocator.free(scope_description);
+        const title = try std.fmt.allocPrint(options.allocator, "Dependency metrics — {s}", .{scope_description});
+        defer options.allocator.free(title);
+        var section = try report_data.dependencySection(
+            options.allocator,
+            title,
+            summary_value.projected_subject_count,
+            summary_value.selected_subject_count,
+            summary_value.total_afferent_coupling,
+            summary_value.total_efferent_coupling,
+            summary_value.average_instability,
+            summary_value.average_coupling_factor,
+        );
+        var section_owned = true;
+        errdefer if (section_owned) section.deinit(options.allocator);
+        var data = report_data.MetricsReportData{};
+        errdefer data.deinit(options.allocator);
+        try data.appendSectionMove(options.allocator, &section);
+        section_owned = false;
+        data.sort();
+        return data;
+    }
+
+    pub fn toHtml(
+        self: *const DependencyMetrics,
+        options: CheckOptions,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror![]u8 {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+    }
+
+    pub fn exportAsHtml(
+        self: *const DependencyMetrics,
+        options: CheckOptions,
+        output_path: []const u8,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror!void {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.exportAsHtml(
+            options.allocator,
+            options.io,
+            &data,
+            output_path,
+            export_options,
+        );
     }
 };
 
@@ -1318,6 +1423,58 @@ pub const CustomMetricSelection = struct {
         var analysis = try analyzeCustomMetricSubjects(self, options);
         defer analysis.deinit(options.allocator);
         return custom_calculation.measure(options.allocator, analysis.subjects.items, self.definition());
+    }
+
+    pub fn gatherReportData(
+        self: *const CustomMetricSelection,
+        options: CheckOptions,
+    ) anyerror!report_data.MetricsReportData {
+        var measurements = try self.measure(options);
+        defer measurements.deinit(options.allocator);
+        const subjects = try self.subjectDescription(options.allocator);
+        defer options.allocator.free(subjects);
+        const title = try std.fmt.allocPrint(
+            options.allocator,
+            "Custom metric {s} ({s}) — {s}",
+            .{ self.name, self.description_value, subjects },
+        );
+        defer options.allocator.free(title);
+        var section = try report_data.customSection(options.allocator, title, &measurements);
+        var section_owned = true;
+        errdefer if (section_owned) section.deinit(options.allocator);
+        var data = report_data.MetricsReportData{};
+        errdefer data.deinit(options.allocator);
+        try data.appendSectionMove(options.allocator, &section);
+        section_owned = false;
+        data.sort();
+        return data;
+    }
+
+    pub fn toHtml(
+        self: *const CustomMetricSelection,
+        options: CheckOptions,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror![]u8 {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+    }
+
+    pub fn exportAsHtml(
+        self: *const CustomMetricSelection,
+        options: CheckOptions,
+        output_path: []const u8,
+        export_options: report_export.MetricsExportOptions,
+    ) anyerror!void {
+        var data = try self.gatherReportData(options);
+        defer data.deinit(options.allocator);
+        return report_export.exportAsHtml(
+            options.allocator,
+            options.io,
+            &data,
+            output_path,
+            export_options,
+        );
     }
 
     pub fn shouldBeBelow(
@@ -2535,6 +2692,99 @@ test "metric predicate builder chains release every partial allocation" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         exerciseMetricPredicateBuilderAllocationFailures,
+        .{},
+    );
+}
+
+test "metric builders gather typed report data render HTML and export through one boundary" {
+    const options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+
+    var counts = try root.count();
+    defer counts.deinit();
+    var count_data = try counts.gatherReportData(options);
+    defer count_data.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), count_data.items().len);
+    try std.testing.expectEqual(report_data.MetricsReportSectionKind.count, count_data.items()[0].kind);
+    const count_html = try counts.toHtml(
+        options,
+        .{ .title = "Count report", .include_timestamp = false },
+    );
+    defer std.testing.allocator.free(count_html);
+    try std.testing.expect(std.mem.indexOf(u8, count_html, "subject_count") != null);
+
+    var dependencies = try root.dependency();
+    defer dependencies.deinit();
+    var dependency_data = try dependencies.gatherReportData(options);
+    defer dependency_data.deinit(std.testing.allocator);
+    try std.testing.expectEqual(report_data.MetricsReportSectionKind.dependency, dependency_data.items()[0].kind);
+    const dependency_html = try dependencies.toHtml(
+        options,
+        .{ .title = "Dependency report", .include_timestamp = false },
+    );
+    defer std.testing.allocator.free(dependency_html);
+    try std.testing.expect(std.mem.indexOf(u8, dependency_html, "average_instability") != null);
+
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var custom = try selected.customMetric(
+        "dependency_weighted_lines",
+        "non-blank lines plus distinct outgoing file dependencies",
+        custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+    );
+    defer custom.deinit();
+    var custom_data = try custom.gatherReportData(options);
+    defer custom_data.deinit(std.testing.allocator);
+    try std.testing.expectEqual(report_data.MetricsReportSectionKind.custom, custom_data.items()[0].kind);
+    try std.testing.expectEqualStrings("src/a.zig", custom_data.items()[0].items()[0].label);
+    try std.testing.expectEqual(@as(u64, 8), custom_data.items()[0].items()[0].value.unsigned);
+    const custom_html = try custom.toHtml(
+        options,
+        .{ .title = "Custom report", .include_timestamp = false },
+    );
+    defer std.testing.allocator.free(custom_html);
+    try std.testing.expect(std.mem.indexOf(u8, custom_html, "dependency_weighted_lines") != null);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(tmp_root);
+    const requested = try std.fs.path.join(std.testing.allocator, &.{ tmp_root, "nested", "counts" });
+    defer std.testing.allocator.free(requested);
+    try counts.exportAsHtml(
+        options,
+        requested,
+        .{ .title = "Exported count report", .include_timestamp = false },
+    );
+    const expected = try std.fmt.allocPrint(std.testing.allocator, "{s}.html", .{requested});
+    defer std.testing.allocator.free(expected);
+    const written = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        expected,
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(written);
+    try std.testing.expect(std.mem.indexOf(u8, written, "<title>Exported count report</title>") != null);
+}
+
+fn exerciseMetricReportingAllocationFailures(allocator: Allocator) !void {
+    var root = try metrics(allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var counts = try root.count();
+    defer counts.deinit();
+    const html = try counts.toHtml(
+        CheckOptions.init(allocator, std.testing.io),
+        .{ .include_timestamp = false },
+    );
+    defer allocator.free(html);
+}
+
+test "metric reporting releases analysis data and partial rendering allocations" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseMetricReportingAllocationFailures,
         .{},
     );
 }

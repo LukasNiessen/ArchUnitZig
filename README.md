@@ -152,6 +152,31 @@ Integer thresholds retain signed/unsigned precision, floating thresholds must be
 integer/floating comparisons are rejected instead of coerced. [D041](docs/decisions.md#d041--metric-selections-have-five-threshold-verbs-and-one-predicate-verb)
 records the evidence and vocabulary contract.
 
+Metrics can also be gathered as owned structured data or written as a self-contained HTML report:
+
+```zig
+const check_options = archunit.CheckOptions.init(allocator, io);
+var source = try archunit.metrics(allocator, .{ .locator = "." });
+defer source.deinit();
+
+var report = try archunit.MetricsExporter.gatherComprehensive(&source, check_options);
+defer report.deinit(allocator);
+try archunit.MetricsExporter.exportAsHtml(
+    allocator,
+    io,
+    &report,
+    "zig-out/architecture/metrics",
+    .{ .title = "Architecture metrics", .include_timestamp = false },
+);
+```
+
+The exporter appends `.html`, creates parent directories, and embeds all styling without network
+resources. `CountMetrics`, `DependencyMetrics`, and `CustomMetricSelection` also expose
+`gatherReportData`, `toHtml`, and `exportAsHtml` for focused reports. Disable the timestamp for
+golden output. Reports include only metrics ArchUnitZig actually calculates; absent class-oriented
+concepts are not rendered as zero-valued placeholders. See
+[D042](docs/decisions.md#d042--metrics-reports-serialize-owned-zig-native-data).
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.

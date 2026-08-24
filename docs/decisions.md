@@ -953,3 +953,36 @@ selection is guarded before the predicate runs.
 Consequence: every metric family reads with one terminal vocabulary, exact numeric boundaries are
 reviewable without silent coercion, arbitrary policies receive useful Zig context, and structured
 diagnostics distinguish threshold disagreement from predicate rejection.
+
+### D042 — Metrics reports serialize owned Zig-native data
+
+Metrics gathering, presentation, and filesystem export are three separate operations. The shared
+`MetricsReportData` value owns sorted sections, titles, labels, and tagged `MetricValue` entries.
+Count builders gather their structural summary, dependency builders gather their selected totals
+and full-projection ratios, and custom builders gather their per-subject measurements. Consumers can
+inspect or clone that data without parsing presentation output.
+
+`MetricsExporter.gatherComprehensive` composes the count report with dependency data only when the
+scope targets files. Declaration and container scopes have no independent dependency topology, so
+their comprehensive report contains count facts alone. Custom metrics are definition-specific and
+cannot be guessed by a global exporter; their own builder produces a custom section. Report sections
+therefore contain only values the current Zig implementation calculates. Class/interface counts,
+LCOM, abstractness, main-sequence distance, and zone labels are omitted rather than displayed as
+misleading zeros.
+
+Canonical order is section kind, section title, then metric label. Rendering clones and sorts its
+input so callers retain both ownership and their original order. Numeric tags remain distinguishable
+in HTML metadata while displayed values use their exact integer or finite floating representation.
+The renderer emits one complete offline document with embedded default CSS and no scripts, links, or
+remote resources. User titles, section titles, and labels are HTML-escaped. Custom CSS remains CSS,
+but every case-insensitive closing `style` token is neutralized so it cannot terminate the embedded
+element. The optional generation time is UTC; callers disable it for deterministic golden output.
+
+HTML export trims and validates the requested path, preserves an existing case-insensitive `.html`
+extension, otherwise appends `.html`, creates parent directories, and propagates directory and write
+errors. It accepts explicit allocator and `std.Io` values and never hides I/O behind rendering.
+
+Consequence: automation can consume the same owned summary verified by tests, human reports cannot
+drift from the displayed data, unsupported object-oriented concepts stay visibly absent, offline
+reports are portable, and deterministic builds remain possible without weakening the default human
+timestamp.
