@@ -46,6 +46,7 @@ test "check options have safe deterministic defaults" {
     try std.testing.expect(options.logging == null);
     try std.testing.expect(options.logger == null);
     try std.testing.expectEqual(@as(usize, 0), options.extraction.exclusions.len);
+    try std.testing.expect(options.extraction.include_test_imports);
     try std.testing.expectEqual(@as(usize, 0), options.extraction.module_resolution.compilation_units.len);
     try std.testing.expectEqual(BuildGraphMode.explicit_only, options.extraction.build_graph_mode);
 }

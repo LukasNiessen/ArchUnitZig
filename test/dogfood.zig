@@ -7,7 +7,10 @@ const production_exclusions = [_][]const u8{
     "test/**",
 };
 const fixture_exclusions = [_][]const u8{"testdata/**"};
-const all_production_files = [_]archunit.Pattern{.{ .glob = "src/**/*.zig" }};
+const all_production_files = [_]archunit.Pattern{
+    .{ .glob = "src/*.zig" },
+    .{ .glob = "src/**/*.zig" },
+};
 const common_files = [_]archunit.Pattern{.{ .glob = "src/common/**" }};
 const testing_files = [_]archunit.Pattern{
     .{ .glob = "src/testing.zig" },
