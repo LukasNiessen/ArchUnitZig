@@ -13,6 +13,16 @@ pub const DependencyMetricInfo = @import("metrics/calculation/dependency.zig").D
 pub const DependencyMetricSnapshot = @import("metrics/calculation/dependency.zig").DependencyMetricSnapshot;
 pub const DependencyCalculationError = @import("metrics/calculation/dependency.zig").CalculationError;
 pub const calculateDependencyMetrics = @import("metrics/calculation/dependency.zig").calculateDependencyMetrics;
+pub const CustomDependencyFacts = @import("metrics/calculation/custom.zig").CustomDependencyFacts;
+pub const CustomMetricCalculation = @import("metrics/calculation/custom.zig").CustomMetricCalculation;
+pub const CustomMetricDefinition = @import("metrics/calculation/custom.zig").CustomMetricDefinition;
+pub const CustomMetricInfo = @import("metrics/calculation/custom.zig").CustomMetricInfo;
+pub const CustomMetricMeasurement = @import("metrics/calculation/custom.zig").CustomMetricMeasurement;
+pub const CustomMetricMeasurements = @import("metrics/calculation/custom.zig").CustomMetricMeasurements;
+pub const CustomMetricPredicate = @import("metrics/calculation/custom.zig").CustomMetricPredicate;
+pub const gatherCustomMetricPredicateViolations = @import("metrics/calculation/custom.zig").gatherPredicateViolations;
+pub const gatherCustomMetricThresholdViolations = @import("metrics/calculation/custom.zig").gatherThresholdViolations;
+pub const measureCustomMetric = @import("metrics/calculation/custom.zig").measure;
 pub const MetricBuilderError = @import("metrics/fluentapi/metrics.zig").BuilderError;
 pub const MetricProjectOptions = @import("metrics/fluentapi/metrics.zig").ProjectOptions;
 pub const MetricTargetLevel = @import("metrics/fluentapi/metrics.zig").TargetLevel;
@@ -39,6 +49,7 @@ test {
     _ = @import("metrics/assertion/threshold.zig");
     _ = @import("metrics/calculation/count.zig");
     _ = @import("metrics/calculation/dependency.zig");
+    _ = @import("metrics/calculation/custom.zig");
     _ = @import("metrics/fluentapi/metrics.zig");
     _ = @import("metrics/extraction/structural.zig");
 }
