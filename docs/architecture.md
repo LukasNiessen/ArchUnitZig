@@ -449,3 +449,5 @@ testing/reporting layer. Architecture disagreement stays outside both sets as vi
 5. `std.testing.allocator` detects leaks on owned paths, AST-derived data, violations, and reports.
 6. Golden diagnostics/renderers are deterministic and tested with hostile escaping input.
 7. Dogfood rules protect this repository's module boundaries and include negative proof tests.
+8. A separate public-facade test root builds and analyzes offline clean/violating Zig project twins
+   from a path containing spaces, with an explicit repository-local compiler cache.
