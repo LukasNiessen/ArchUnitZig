@@ -349,14 +349,17 @@ public graph and report data.
 
 ## More documentation
 
+- [Documentation site](https://lukasniessen.github.io/ArchUnitZig/)
+- [Compiler-generated API reference](https://lukasniessen.github.io/ArchUnitZig/api/)
 - [Architecture and executable dogfood rules](docs/architecture.md)
 - [Zig-specific design decisions](docs/decisions.md)
 - [Ordered roadmap](docs/roadmap.md)
 - [Contribution and quality workflow](CONTRIBUTING.md)
 
 For repository development, run `zig fmt --check build.zig build.zig.zon src` and `zig build test`.
-The full build additionally compiles the README consumer and every fenced example in Debug and
-`ReleaseSafe` release verification.
+The test build compiles the standalone README consumer and every fenced example without requiring
+Python. Run `zig build docs` after guide, example, public API, or theme changes; it first runs that
+consumer chain, then builds and validates the guide and compiler API docs.
 
 ## License
 

@@ -1,0 +1,84 @@
+{
+  "site_title": "ArchUnitZig",
+  "site_description": "Architecture tests for Zig projects.",
+  "base_url": "https://lukasniessen.github.io/ArchUnitZig/",
+  "pages": [
+    {
+      "slug": "",
+      "label": "Getting started",
+      "title": "Architecture tests that read like policy",
+      "description": "Install ArchUnitZig and add a first architecture test to a Zig 0.16 project.",
+      "source": "pages/getting-started.html"
+    },
+    {
+      "slug": "grammar-patterns",
+      "label": "Grammar & patterns",
+      "title": "Grammar, patterns, and ownership",
+      "description": "Understand ArchUnitZig's fluent pipeline, glob and regex semantics, exclusions, and owned builders.",
+      "source": "pages/grammar-patterns.html"
+    },
+    {
+      "slug": "extraction-modules",
+      "label": "Extraction & modules",
+      "title": "Extraction and module resolution",
+      "description": "How ArchUnitZig discovers projects, parses dependency calls, and classifies Zig modules and resources.",
+      "source": "pages/extraction-modules.html"
+    },
+    {
+      "slug": "files",
+      "label": "Files",
+      "title": "File architecture rules",
+      "description": "Express naming, location, dependency, external-module, cycle, and custom rules over Zig files.",
+      "source": "pages/files.html"
+    },
+    {
+      "slug": "layers",
+      "label": "Layers",
+      "title": "Named layer policies",
+      "description": "Define ordered architecture layers, dependency policies, and strict ownership checks.",
+      "source": "pages/layers.html"
+    },
+    {
+      "slug": "slices",
+      "label": "Slices",
+      "title": "Slice architecture and diagrams",
+      "description": "Project files into named slices, constrain dependencies, detect cycles, and compare PlantUML diagrams.",
+      "source": "pages/slices.html"
+    },
+    {
+      "slug": "graph-reports",
+      "label": "Graph reports",
+      "title": "Query and export dependency graphs",
+      "description": "Create owned graph snapshots and render focused architecture reports in six offline formats.",
+      "source": "pages/graph-reports.html"
+    },
+    {
+      "slug": "metrics",
+      "label": "Metrics",
+      "title": "Zig-native architecture metrics",
+      "description": "Measure structural counts and dependency coupling, enforce thresholds, and export offline reports.",
+      "source": "pages/metrics.html"
+    },
+    {
+      "slug": "testing",
+      "label": "Testing & diagnostics",
+      "title": "Testing, results, and diagnostics",
+      "description": "Integrate architecture checks with zig test and capture stable results, errors, and explicit logs.",
+      "source": "pages/testing.html"
+    },
+    {
+      "slug": "internals",
+      "label": "Internals",
+      "title": "Architecture and design boundaries",
+      "description": "Explore ArchUnitZig's extraction, projection, policy, and reporting boundaries and their design rationale.",
+      "source": "pages/internals.html"
+    },
+    {
+      "slug": "limitations",
+      "label": "Limitations",
+      "title": "Current limitations and honest boundaries",
+      "description": "Know which Zig concepts ArchUnitZig supports today and where explicit configuration is still required.",
+      "source": "pages/limitations.html"
+    }
+  ]
+}

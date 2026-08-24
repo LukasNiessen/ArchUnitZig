@@ -1,0 +1,29 @@
+<h1>Testing, results, and diagnostics</h1>
+<p class="lead">Architecture rules integrate with <code>zig test</code> at one explicit adapter edge. Underneath that edge, violations, diagnostics, logging records, and rendered results remain inspectable values.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+{{source:test/readme/testing.zig}}
+
+<h2 id="expect">Native test helpers</h2>
+<p><code>expectPasses</code> and <code>assertPasses</code> accept a concrete terminal, run its <code>check</code>, render its owned description through <code>ResultFactory</code>, emit a failure once, and return <code>error.ArchitectureViolation</code>. Pass <code>std.testing.allocator</code> and the test's concrete <code>std.Io</code> so allocation and output remain test-controlled.</p>
+
+<h2 id="structured">Assert structured evidence first</h2>
+<p>For a negative control, call <code>check</code> directly, inspect the tagged <code>ViolationList</code>, and assert exact paths, policy kinds, import kinds, or source locations. Then render the same value and assert the user-facing result contains the concrete evidence. This proves both policy behavior and presentation without brittle whole-message matching everywhere.</p>
+
+<h2 id="results">Stable result formatting</h2>
+<p><code>ViolationFactory</code> converts every known violation variant into an owned heading, details, and plain sort key. <code>ResultFactory</code> orders those values, numbers failures, and combines them with the rule sentence. ANSI color is added only after ordering and is opt-in when terminal capability is known.</p>
+
+<h2 id="errors">Errors and violations are different</h2>
+<p>A policy disagreement is a returned violation. Invalid configuration and technical failures use Zig error unions plus optional <code>ErrorContext</code> and <code>Diagnostic</code> values. Keep those channels separate: a parser failure should not masquerade as a forbidden dependency, and a normal architecture violation should not look like an extractor crash.</p>
+
+<h2 id="logging">Explicit operation-local logging</h2>
+<p><code>CheckOptions.logging</code> defaults to null and has zero logging work. When configured, one check or export owns a session over borrowed writers, callback sinks, or an optional file sink. Events use a fixed vocabulary for check boundaries, extraction, cache behavior, violations, metrics, and exports.</p>
+<p>Level and family filters run before message allocation or clock access. Control bytes are sanitized, messages are capped, and absolute project roots are not included in progress records. Sink and write failures propagate instead of disappearing.</p>
+
+<h2 id="qa-pattern">A resilient architecture-test pattern</h2>
+<ol>
+  <li>Compile a clean external fixture and assert its public-facade rules pass.</li>
+  <li>Keep a minimal violating twin and assert exact structured evidence.</li>
+  <li>Render the same violation to prove its human output.</li>
+  <li>Run rules over the library itself so documentation and boundaries cannot drift together unnoticed.</li>
+</ol>

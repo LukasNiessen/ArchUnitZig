@@ -1,0 +1,43 @@
+<h1>Architecture tests that read like policy</h1>
+<p class="lead">ArchUnitZig turns a Zig project's imports into an owned dependency graph, then lets ordinary <code>zig test</code> tests enforce boundaries over files, layers, slices, reports, and Zig-native metrics.</p>
+
+<div class="callout">
+  <strong>Release status</strong>
+  ArchUnitZig targets Zig 0.16.0 and is currently pre-release. Pin a reviewed commit when reproducibility matters.
+</div>
+
+<h2 id="install">Install from the package manager</h2>
+<p>Add the package with a stable dependency name. During pre-release development, replace <code>main</code> with a reviewed commit hash in durable projects.</p>
+<pre><code class="language-console">zig fetch --save=archunit git+https://github.com/LukasNiessen/ArchUnitZig.git#main</code></pre>
+<p>Expose ArchUnitZig only to the test module that owns your architecture policy. This is the repository's compiled standalone-consumer fixture—not an abbreviated approximation.</p>
+{{source:test/fixtures/readme-consumer/build.zig}}
+
+<h2 id="first-rule">Write the first rule</h2>
+<p>This test selects production Zig files, asks for a positive policy, creates a cycle rule, and delegates failures to the native test adapter. Every fluent stage owns allocated state, so each stage has a matching <code>deinit</code>.</p>
+{{source:test/fixtures/readme-consumer/test/architecture.zig}}
+
+<h2 id="run">Run it</h2>
+<pre><code class="language-console">zig build test</code></pre>
+<p>A passing rule is quiet. A violation returns <code>error.ArchitectureViolation</code> and prints stable, structured evidence through ArchUnitZig's result formatter.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Lazy until the terminal</h3>
+    <p>Selectors and predicates perform no project I/O. <code>check</code>, <code>expectPasses</code>, report rendering, or export is the execution boundary.</p>
+  </article>
+  <article class="card">
+    <h3>Allocator-visible ownership</h3>
+    <p>Builders are independent owned values. Clone explicitly when branching and release every owned stage.</p>
+  </article>
+  <article class="card">
+    <h3>Violations are values</h3>
+    <p>Rules return tagged, inspectable violations before presentation. Tests can assert exact paths, kinds, and dependency evidence.</p>
+  </article>
+  <article class="card">
+    <h3>Zig concepts stay Zig-shaped</h3>
+    <p>Imports, resources, modules, declarations, containers, and coupling replace class-oriented vocabulary that has no honest Zig equivalent.</p>
+  </article>
+</div>
+
+<h2 id="where-next">Choose a domain</h2>
+<p>Start with <a href="{{root}}files/">file rules</a> for most boundaries, move to <a href="{{root}}layers/">named layers</a> for an architectural map, and use <a href="{{root}}testing/">testing and diagnostics</a> when integrating the result into a larger suite. The <a href="{{root}}api/">compiler-generated API reference</a> lists the complete public facade.</p>

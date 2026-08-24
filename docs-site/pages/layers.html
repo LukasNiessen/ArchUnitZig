@@ -1,0 +1,33 @@
+<h1>Named layer policies</h1>
+<p class="lead">Layers assign project files to named architecture areas and express allowed dependencies between those areas. Ordered definitions make overlapping selectors deterministic.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+{{source:test/readme/layers.zig}}
+
+<h2 id="definitions">Define layers in ownership order</h2>
+<p>Create a layered architecture, then add definitions with a stable name and path selectors. The first matching definition owns a file when selectors overlap. Exclusions apply before ownership assignment.</p>
+<p>Layer names must be unique and policy references must name existing layers. Definitions and policies are validated before extraction, so configuration errors remain distinct from architecture violations.</p>
+
+<h2 id="policies">Choose the dependency policy</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Policy</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>mayOnlyDependOn</code></td><td>Outgoing dependencies may target only the named layers (and the same layer).</td></tr>
+      <tr><td><code>mayNotDependOn</code></td><td>Outgoing dependencies must avoid the named layers.</td></tr>
+      <tr><td><code>mayOnlyBeDependedOnBy</code></td><td>Incoming dependencies may originate only in the named layers.</td></tr>
+      <tr><td><code>mayNotBeDependedOnBy</code></td><td>Incoming dependencies must avoid the named layers.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="strict">Strict ownership closes gaps</h2>
+<p>Enable strict assignment when every connected project file must belong to a named layer. Unassigned sources and targets become structured violations instead of silently living outside the architecture map. For isolated files, combine strict layers with a file callback or repository dogfood rule that names every top-level production folder.</p>
+
+<h2 id="evidence">Violation evidence</h2>
+<p>A layer dependency violation records the policy kind, source and target layer, source and target file, and the underlying dependency evidence. The formatter can therefore explain both the intended boundary and the concrete import that crossed it.</p>
+
+<div class="callout">
+  <strong>A practical default</strong>
+  Let domain layers depend on a shared low-level layer, keep domain layers independent of one another, allow the testing adapter to read common results, and let only the public facade assemble all domains.
+</div>

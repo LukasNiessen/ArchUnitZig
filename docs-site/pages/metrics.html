@@ -1,0 +1,38 @@
+<h1>Zig-native architecture metrics</h1>
+<p class="lead">Metrics analyze Zig declarations, source structure, and dependency coupling. They intentionally omit object-oriented measures that would turn absent Zig concepts into misleading zeros.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+{{source:test/readme/metrics.zig}}
+
+<h2 id="scopes">Choose files, declarations, or containers</h2>
+<p>Begin with a file scope and its normal path selectors. Project that scope to named declarations or containers when the metric should operate at Zig declaration identity. Name filters compare both simple and qualified names consistently.</p>
+
+<h2 id="counts">Structural counts</h2>
+<p>Count declarations, functions, tests, constants, variables, fields, structs, unions, enums, opaque types, error sets, anonymous containers, imports, statements, tokens, source lines, and non-blank lines. A measurement returns owned subject/value pairs; a threshold rule returns structured metric violations.</p>
+
+<h2 id="coupling">Dependency coupling</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Metric</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Afferent coupling</td><td>Selected incoming dependency count.</td></tr>
+      <tr><td>Efferent coupling</td><td>Selected outgoing dependency count.</td></tr>
+      <tr><td>Instability</td><td><code>Ce / (Ca + Ce)</code> over the selected projection.</td></tr>
+      <tr><td>Coupling factor</td><td>Observed internal relationships relative to possible relationships.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="thresholds">Thresholds and predicates</h2>
+<p>Integral counts stay integers through comparison. Ratios stay finite floating-point values. The API does not implicitly mix them because conversion can change an equality boundary. Built-in threshold rules support below, above, equal, and inclusive variants; <code>shouldSatisfy</code> accepts a borrowed callback and returns a distinct predicate violation when it rejects a subject.</p>
+
+<h2 id="custom">Custom metrics</h2>
+<p>A custom metric receives borrowed structural facts, or full dependency facts for a dependency projection, plus an optional caller context. It returns one tagged scalar per selected subject. Custom definitions own their name and description so diagnostic and report lifetimes do not depend on callback storage.</p>
+
+<h2 id="reports">Owned data and offline HTML</h2>
+<p>Count, dependency, and custom builders gather <code>MetricsReportData</code> before rendering. Sections and entries are sorted without mutating the caller's data. The HTML renderer escapes titles and labels, neutralizes embedded-style terminators in custom CSS, uses no scripts or remote assets, and supports deterministic output without a timestamp.</p>
+
+<div class="warning">
+  <strong>Not class metrics with new names</strong>
+  LCOM, abstractness, distance from the main sequence, zone labels, and class/interface totals are not shipped. Add a custom metric only when your repository has a precise Zig-level definition.
+</div>
