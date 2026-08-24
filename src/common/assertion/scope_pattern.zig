@@ -12,6 +12,7 @@ pub const ScopePattern = struct {
     syntax: matching.PatternSyntax,
     target: matching.PatternTarget,
     matching: matching.MatchingMode,
+    is_exclusion: bool = false,
 
     pub fn init(
         allocator: Allocator,
@@ -44,6 +45,29 @@ pub const ScopePattern = struct {
         };
     }
 
+    pub fn initExclusion(
+        allocator: Allocator,
+        selector_index: usize,
+        pattern: matching.Pattern,
+        target: matching.PatternTarget,
+        matching_mode: matching.MatchingMode,
+    ) Allocator.Error!ScopePattern {
+        var result = try init(allocator, selector_index, pattern, target, matching_mode);
+        result.is_exclusion = true;
+        return result;
+    }
+
+    pub fn initLiteralExclusion(
+        allocator: Allocator,
+        selector_index: usize,
+        expression: []const u8,
+        target: matching.PatternTarget,
+    ) Allocator.Error!ScopePattern {
+        var result = try initLiteral(allocator, selector_index, expression, target);
+        result.is_exclusion = true;
+        return result;
+    }
+
     pub fn clone(self: ScopePattern, allocator: Allocator) Allocator.Error!ScopePattern {
         return .{
             .selector_index = self.selector_index,
@@ -51,6 +75,7 @@ pub const ScopePattern = struct {
             .syntax = self.syntax,
             .target = self.target,
             .matching = self.matching,
+            .is_exclusion = self.is_exclusion,
         };
     }
 
@@ -64,7 +89,8 @@ pub const ScopePattern = struct {
             std.mem.eql(u8, self.expression, other.expression) and
             self.syntax == other.syntax and
             self.target == other.target and
-            self.matching == other.matching;
+            self.matching == other.matching and
+            self.is_exclusion == other.is_exclusion;
     }
 };
 
@@ -95,4 +121,19 @@ test "scope pattern describes exact literals without calling them globs or regex
     try std.testing.expectEqualStrings("src/order.zig", scope.expression);
     try std.testing.expectEqual(matching.PatternSyntax.literal, scope.syntax);
     try std.testing.expectEqual(matching.MatchingMode.exact, scope.matching);
+}
+
+test "scope pattern retains exclusion evidence through cloning" {
+    var exclusion = try ScopePattern.initExclusion(
+        std.testing.allocator,
+        1,
+        .{ .regex = "generated" },
+        .path,
+        .partial,
+    );
+    defer exclusion.deinit(std.testing.allocator);
+    var cloned = try exclusion.clone(std.testing.allocator);
+    defer cloned.deinit(std.testing.allocator);
+    try std.testing.expect(cloned.is_exclusion);
+    try std.testing.expect(exclusion.eql(cloned));
 }

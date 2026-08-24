@@ -521,7 +521,12 @@ fn writeEnumSet(writer: *std.Io.Writer, comptime E: type, values: std.EnumSet(E)
 fn writeScope(writer: *std.Io.Writer, scope: []const assertion.ScopePattern) std.Io.Writer.Error!void {
     for (scope, 0..) |pattern, index| {
         if (index != 0) {
-            try writer.writeAll(if (pattern.selector_index == scope[index - 1].selector_index) " OR " else " AND ");
+            if (pattern.is_exclusion) {
+                try writer.writeAll(" EXCEPT ");
+            } else {
+                try writer.writeAll(if (pattern.selector_index == scope[index - 1].selector_index and
+                    !scope[index - 1].is_exclusion) " OR " else " AND ");
+            }
         }
         try writer.print(
             "{s} {s} \"{f}\" ({s})",
