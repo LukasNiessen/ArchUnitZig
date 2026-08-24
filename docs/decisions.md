@@ -1044,8 +1044,10 @@ located project root. Useful normalized project-relative identifiers may remain 
 File logging uses the caller's explicit `std.Io`, creates the configured directory lazily on the
 first emitted event, and chooses a UTC nanosecond filename from the prefix. `overwrite` truncates a
 same-name file; `append` continues it. This makes deterministic fixed-clock behavior explicit rather
-than pretending timestamp names can never collide. The session closes its file and releases its path
-without taking ownership of any configuration slice.
+than pretending timestamp names can never collide. Prefixes accept only portable ASCII letters,
+digits, `.`, `_`, and `-`, preventing separator, control-byte, and platform-specific filename
+injection. The session closes its file and releases its path without taking ownership of any
+configuration slice.
 
 Sink, formatting, allocation, directory, and write failures propagate instead of silently dropping
 diagnostics. If a check has already failed, its original error takes precedence over a secondary

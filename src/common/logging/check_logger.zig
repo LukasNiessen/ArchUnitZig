@@ -110,7 +110,7 @@ pub const CheckLogger = struct {
             .info,
             .@"export",
             "format={s} file={s}",
-            .{ format, std.fs.path.basename(output_path) },
+            .{ format, portableBasename(output_path) },
         );
     }
 
@@ -241,7 +241,18 @@ fn sanitize(allocator: Allocator, value: []const u8) Allocator.Error![]u8 {
 }
 
 fn safeSubject(value: []const u8) []const u8 {
-    return if (std.fs.path.isAbsolute(value)) std.fs.path.basename(value) else value;
+    return if (std.fs.path.isAbsoluteWindows(value) or std.fs.path.isAbsolutePosix(value))
+        portableBasename(value)
+    else
+        value;
+}
+
+fn portableBasename(value: []const u8) []const u8 {
+    var start: usize = 0;
+    for (value, 0..) |byte, index| {
+        if (byte == '/' or byte == '\\') start = index + 1;
+    }
+    return value[start..];
 }
 
 fn writeTimestamp(writer: *Io.Writer, timestamp: Io.Timestamp, filename: bool) Allocator.Error!void {
@@ -299,7 +310,11 @@ fn validNamePrefix(value: []const u8) bool {
     if (!containsNonWhitespace(value) or
         std.mem.eql(u8, value, ".") or
         std.mem.eql(u8, value, "..")) return false;
-    return std.mem.indexOfAny(u8, value, "/\\") == null;
+    for (value) |byte| {
+        if (std.ascii.isAlphanumeric(byte) or byte == '.' or byte == '_' or byte == '-') continue;
+        return false;
+    }
+    return true;
 }
 
 const fixed_timestamp = Io.Timestamp.fromNanoseconds(
@@ -322,6 +337,38 @@ test "disabled sessions do not initialize a logger or read a clock" {
     defer session.deinit();
     try session.activate(&options);
     try std.testing.expect(options.logger == null);
+}
+
+test "logger configuration rejects missing sinks and non-portable file components" {
+    try std.testing.expectError(
+        error.MissingLogSink,
+        CheckLogger.init(std.testing.allocator, std.testing.io, .{}),
+    );
+    try std.testing.expectError(
+        error.InvalidLogDirectory,
+        CheckLogger.init(
+            std.testing.allocator,
+            std.testing.io,
+            .{ .file = .{ .output_directory = " \t" } },
+        ),
+    );
+    const invalid_prefixes = [_][]const u8{
+        "",
+        ".",
+        "..",
+        "../escape",
+        "nested/name",
+        "bad\\name",
+        "bad:name",
+        "bad*name",
+        "line\nbreak",
+    };
+    for (invalid_prefixes) |name| {
+        try std.testing.expectError(
+            error.InvalidLogNamePrefix,
+            CheckLogger.init(std.testing.allocator, std.testing.io, .{ .file = .{ .name_prefix = name } }),
+        );
+    }
 }
 
 test "fixed vocabulary level filtering and custom records use safe in-memory output" {
@@ -401,7 +448,7 @@ test "file output creates timestamped directories and honors overwrite then appe
     try std.testing.expect(std.mem.indexOf(u8, contents, "third") != null);
 }
 
-test "custom logger failures propagate and absolute subjects expose only their basename" {
+test "custom logger failures propagate and host-independent paths expose only their basename" {
     const Failing = struct {
         fn write(_: LogRecord) !void {
             return error.MockLogSinkFailure;
@@ -423,8 +470,14 @@ test "custom logger failures propagate and absolute subjects expose only their b
     });
     defer safe.deinit();
     try safe.logMetric("count\nforged", .{ .unsigned = 1 }, "C:\\private\\token\\secret.zig");
+    try safe.logMetric("count", .{ .unsigned = 2 }, "/private/token/other-secret.zig");
+    try safe.logExport("html", "nested\\private/report.html");
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "C:\\private") == null);
-    try std.testing.expect(std.mem.indexOf(u8, output.written(), "secret.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "/private") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "nested") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "subject=secret.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "subject=other-secret.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "file=report.html") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "count?forged") != null);
 }
 

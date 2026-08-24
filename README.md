@@ -243,8 +243,9 @@ check_options.logging = .{
 
 File sinks create the directory and use UTC nanosecond names such as
 `architecture-2026-08-11_10-11-12-123456789.log`. Writer, structured, and file sinks may be
-combined. Their configuration is borrowed for one operation, logging errors propagate, and no
-process-global logger or implicit stdout/stderr writer exists. See
+combined; prefixes use portable ASCII letters, digits, `.`, `_`, and `-`. Their configuration is
+borrowed for one operation, logging errors propagate, and no process-global logger or implicit
+stdout/stderr writer exists. See
 [D044](docs/decisions.md#d044--logging-is-explicit-borrowed-and-operation-local).
 
 ## Development
