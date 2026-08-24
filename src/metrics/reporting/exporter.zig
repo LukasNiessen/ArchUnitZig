@@ -121,12 +121,15 @@ test "every structured value is rendered and unsupported metric families stay ab
     for (data.items()) |section| {
         try std.testing.expect(std.mem.indexOf(u8, html, section.title) != null);
         for (section.items()) |entry| {
-            try std.testing.expect(std.mem.indexOf(u8, html, entry.label) != null);
             const value = try metricText(std.testing.allocator, entry.value);
             defer std.testing.allocator.free(value);
-            const cell = try std.fmt.allocPrint(std.testing.allocator, ">{s}</td>", .{value});
-            defer std.testing.allocator.free(cell);
-            try std.testing.expect(std.mem.indexOf(u8, html, cell) != null);
+            const row = try std.fmt.allocPrint(
+                std.testing.allocator,
+                "<tr><td>{s}</td><td class=\"value\" data-value-kind=\"{s}\">{s}</td></tr>",
+                .{ entry.label, @tagName(std.meta.activeTag(entry.value)), value },
+            );
+            defer std.testing.allocator.free(row);
+            try std.testing.expect(std.mem.indexOf(u8, html, row) != null);
         }
     }
     for ([_][]const u8{

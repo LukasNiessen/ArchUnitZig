@@ -7,7 +7,11 @@ const Io = std.Io;
 const Writer = std.Io.Writer;
 pub const MetricsReportData = report_data.MetricsReportData;
 pub const MetricValue = report_data.MetricValue;
-pub const RenderError = Allocator.Error || error{InvalidReportTitle};
+pub const RenderError = Allocator.Error || error{
+    EmptyMetricLabel,
+    EmptySectionTitle,
+    InvalidReportTitle,
+};
 
 pub const MetricsExportOptions = struct {
     title: []const u8 = "ArchUnitZig Metrics Report",
@@ -24,10 +28,7 @@ pub fn toHtml(
     options: MetricsExportOptions,
 ) RenderError![]u8 {
     if (!hasText(options.title)) return error.InvalidReportTitle;
-    var sorted = data.clone(allocator) catch |failure| switch (failure) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.EmptyMetricLabel, error.EmptySectionTitle => unreachable,
-    };
+    var sorted = try data.clone(allocator);
     defer sorted.deinit(allocator);
     sorted.sort();
 
