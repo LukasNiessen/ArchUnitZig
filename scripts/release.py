@@ -185,6 +185,22 @@ test \"fresh consumer architecture is acyclic\" {
 """
 
 
+def validate_resolved_dependency(resolved_zon: str, metadata: ReleaseMetadata) -> None:
+    missing: list[str] = []
+    if metadata.archive_url not in resolved_zon:
+        missing.append(f"archive URL {metadata.archive_url!r}")
+    if metadata.package_hash not in resolved_zon:
+        missing.append(f"package hash {metadata.package_hash!r}")
+    if missing:
+        raise ValueError(
+            "zig fetch did not record the reviewed "
+            + " and ".join(missing)
+            + f"\nresolved build.zig.zon:\n{resolved_zon}"
+        )
+    if re.search(r"\.path\s*=", resolved_zon) is not None:
+        raise ValueError("external consumer unexpectedly uses a path dependency")
+
+
 def smoke(metadata: ReleaseMetadata, zig: str) -> None:
     with tempfile.TemporaryDirectory(prefix="archunitzig-release-consumer-") as raw_directory:
         directory = Path(raw_directory)
@@ -208,10 +224,7 @@ def smoke(metadata: ReleaseMetadata, zig: str) -> None:
             env=os.environ.copy(),
         )
         resolved_zon = (directory / "build.zig.zon").read_text(encoding="utf-8")
-        if metadata.archive_url not in resolved_zon or metadata.package_hash not in resolved_zon:
-            raise ValueError("zig fetch did not record the reviewed archive URL and package hash")
-        if re.search(r"\.path\s*=", resolved_zon) is not None:
-            raise ValueError("external consumer unexpectedly uses a path dependency")
+        validate_resolved_dependency(resolved_zon, metadata)
         subprocess.run([zig, "build", "test"], cwd=directory, check=True, env=os.environ.copy())
         print(f"external consumer passed: {metadata.archive_url} ({metadata.package_hash})")
 
