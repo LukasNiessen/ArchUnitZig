@@ -1169,8 +1169,9 @@ The standard-library checker requires the full page set, API entry point, local 
 markers, robots file, and sitemap. It resolves every authored internal link and fragment, rejects
 unresolved templates and remote runtime assets, and checks language, title, description, viewport,
 heading, landmark, labeled navigation, skip-link, focus, overflow, reduced-motion, and responsive
-contracts. Both `zig build docs` and `zig build test` build and validate the site after the compiled
-consumer examples.
+contracts. `zig build docs` builds and validates the site after the compiled consumer examples. The
+ordinary `zig build test` gate continues to compile those canonical examples without requiring
+Python, keeping the core Zig test prerequisite separate from the documentation toolchain.
 
 The Pages workflow gives every push and pull request an ordinary artifact-only build job. Deployment
 is a separate job guarded to a main-branch push in the canonical repository, where it receives the

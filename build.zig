@@ -147,5 +147,5 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run formatting checks and tests");
     test_step.dependOn(&format_check.step);
-    test_step.dependOn(&install_docs.step);
+    test_step.dependOn(&run_readme_tests.step);
 }

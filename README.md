@@ -356,10 +356,10 @@ public graph and report data.
 - [Ordered roadmap](docs/roadmap.md)
 - [Contribution and quality workflow](CONTRIBUTING.md)
 
-For repository development, run `zig fmt --check build.zig build.zig.zon src`, `zig build test`, and
-`zig build docs`. The full test build additionally compiles the README consumer, every fenced
-example, the documentation site, and compiler API docs in Debug and `ReleaseSafe` release
-verification.
+For repository development, run `zig fmt --check build.zig build.zig.zon src` and `zig build test`.
+The test build compiles the standalone README consumer and every fenced example without requiring
+Python. Run `zig build docs` after guide, example, public API, or theme changes; it first runs that
+consumer chain, then builds and validates the guide and compiler API docs.
 
 ## License
 
