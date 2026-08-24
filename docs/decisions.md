@@ -1119,3 +1119,30 @@ Consequence: `zig build test` is executable architecture documentation, false cy
 unit-test scaffolding do not weaken the production policy, consumers can still choose to govern test
 imports, cache entries cannot mix the two semantics, and a silently inert dogfood rule fails its own
 negative control.
+
+### D047 — README code is release-tested consumer code
+
+The README is user documentation for the public `archunit` module, not a catalogue copied from a
+sibling implementation. A small standalone Zig package owns the exact documented `build.zig` and
+first architecture test. It binds ArchUnitZig through a local package-manager dependency during
+repository tests, so documentation verification is offline while exercising the same
+`b.dependency("archunit")` and `module("archunit")` contract produced by `zig fetch --save=archunit`.
+
+Each shipped domain has one separate canonical Zig example below `test/readme/`. One external test
+root imports those examples and receives only the public package module. It runs with the standalone
+consumer as its working directory. The README copies each complete canonical source into a marked
+fence. A contract test normalizes only line endings, then requires byte-for-byte equality between
+every source fence and its compiled file. It also requires the installation command exactly and
+compares the failure-output fence with live plain-text `ResultFactory` output from a deliberately
+violating consumer rule. The contract counts all fences and markers, so an untested block cannot be
+added quietly.
+
+The top-level build orders library tests, acceptance fixtures, external acceptance, dogfood, the
+standalone README consumer, and README examples sequentially. The README states the pre-release
+status and Zig version, describes allocator/deinit responsibilities, and lists unsupported behavior
+instead of projecting TypeScript or object-oriented vocabulary onto Zig.
+
+Consequence: package wiring, public examples, and failure prose drift break `zig build test`; docs
+remain usable without making network access a test prerequisite; unsupported automatic module
+discovery, class metrics, and sibling-only slice vocabulary stay visibly absent; and the README can
+serve as a verified first contact rather than an aspirational feature list.

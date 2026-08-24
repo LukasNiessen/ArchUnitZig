@@ -309,7 +309,7 @@ source locations as separate facts.
 | `@embedFile("asset")` | Resource-class dependency; a resolved in-project asset remains project-owned. |
 | `@cImport` / `@cInclude` | C-header-class evidence while Zig 0.16 still supports the deprecated form. |
 | Import inside `test` | Included by default as a real test consumer; set `include_test_imports = false` for a production-only graph. |
-| Import inside `comptime` | Always retained as production compile-time coupling. |
+| Import inside `comptime` | An ordinary `comptime` outside a `test` declaration remains production compile-time coupling. |
 
 `CompilationUnitOverride` values model each library, executable, test, or other root and its exact
 module alias table. Multiple roots may map the same alias differently. Unknown aliases do not
