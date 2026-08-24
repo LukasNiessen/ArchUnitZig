@@ -270,6 +270,13 @@ The sixth verb, `shouldSatisfy`, routes the value and scalar subject view to a b
 Built-in predicate failures use `MetricPredicateViolation`; custom failures retain their described
 custom evidence. Predicate rules never manufacture a comparison or threshold that did not exist.
 
+Metric reports cross an owned renderer-independent boundary. Count, dependency, and custom builders
+gather their real summaries or measurements into sorted typed sections before rendering. The
+comprehensive facade composes count and file-dependency sections; scopes without a file dependency
+topology omit that section. The offline HTML renderer works only from this data, escapes titles and
+labels, preserves numeric tags, embeds CSS, and optionally adds a UTC timestamp. Export resolves an
+HTML filename, creates parent directories, and writes through caller-supplied `std.Io`.
+
 Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
 identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and
