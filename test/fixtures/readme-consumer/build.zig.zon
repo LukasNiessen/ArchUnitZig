@@ -1,0 +1,10 @@
+.{
+    .name = .readme_consumer,
+    .version = "0.0.0",
+    .fingerprint = 0x9d5aafd04810d714,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .archunit = .{ .path = "../../.." },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "test" },
+}
