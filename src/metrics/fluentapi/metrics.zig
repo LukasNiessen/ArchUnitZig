@@ -426,6 +426,7 @@ pub const MetricsScope = struct {
     }
 
     pub fn analyze(self: *const MetricsScope, options: CheckOptions) anyerror!MetricAnalysis {
+        if (options.logger) |logger| try logger.logExtraction("structural metrics extraction started");
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
         var project = try structural.extractProjectInfo(
@@ -474,6 +475,7 @@ pub const MetricsScope = struct {
                 }
             },
         };
+        if (options.logger) |logger| try logger.logExtraction("structural metrics extraction completed");
         return .{ .project = project, .subjects = subjects };
     }
 
@@ -855,6 +857,10 @@ pub const MetricThresholdRule = struct {
     }
 
     pub fn check(self: *const MetricThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "metrics.count", performCheck);
+    }
+
+    fn performCheck(self: *const MetricThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
         var selection = CountMetricSelection{ .scope = try self.scope.clone(), .metric = self.metric };
         defer selection.deinit();
         var measurements = try selection.measure(options);
@@ -1177,6 +1183,10 @@ pub const DependencyThresholdRule = struct {
     }
 
     pub fn check(self: *const DependencyThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "metrics.dependency", performCheck);
+    }
+
+    fn performCheck(self: *const DependencyThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
         var measurements = try measureDependency(&self.scope, self.metric, options);
         defer measurements.deinit(options.allocator);
         var evidence = try self.scope.scopePatterns(options.allocator);
@@ -1255,7 +1265,7 @@ fn extractFileDependencyMetrics(
 ) anyerror!dependency_calculation.DependencyMetricSnapshot {
     var diagnostics = common_error.ErrorContext.init(options.allocator);
     defer diagnostics.deinit();
-    var graph = try extraction.extractProjectGraph(
+    var graph = try extraction.extractProjectGraphLogged(
         options.allocator,
         options.io,
         scope.owned_locator,
@@ -1263,6 +1273,7 @@ fn extractFileDependencyMetrics(
         options.extraction,
         options.clear_cache,
         &diagnostics,
+        options.logger,
     );
     defer graph.deinit(options.allocator);
 
@@ -1356,6 +1367,10 @@ pub const MetricPredicateRule = struct {
     }
 
     pub fn check(self: *const MetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, self.metric.ruleId(), performCheck);
+    }
+
+    fn performCheck(self: *const MetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
         var analysis = try analyzeStructuralMetricSubjects(&self.scope, options);
         defer analysis.deinit(options.allocator);
         var evidence = try self.scope.scopePatterns(options.allocator);
@@ -1661,6 +1676,10 @@ pub const CustomMetricThresholdRule = struct {
     }
 
     pub fn check(self: *const CustomMetricThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "metrics.custom_threshold", performCheck);
+    }
+
+    fn performCheck(self: *const CustomMetricThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
         var analysis = try analyzeCustomMetricSubjects(&self.selection, options);
         defer analysis.deinit(options.allocator);
         if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
@@ -1696,6 +1715,10 @@ pub const CustomMetricPredicateRule = struct {
     }
 
     pub fn check(self: *const CustomMetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "metrics.custom_predicate", performCheck);
+    }
+
+    fn performCheck(self: *const CustomMetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
         var analysis = try analyzeCustomMetricSubjects(&self.selection, options);
         defer analysis.deinit(options.allocator);
         if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
@@ -1779,7 +1802,7 @@ fn analyzeProjectedCustomMetricSubjects(
 ) anyerror!CustomMetricSubjectAnalysis {
     var diagnostics = common_error.ErrorContext.init(options.allocator);
     defer diagnostics.deinit();
-    var graph = try extraction.extractProjectGraph(
+    var graph = try extraction.extractProjectGraphLogged(
         options.allocator,
         options.io,
         selection.scope.owned_locator,
@@ -1787,6 +1810,7 @@ fn analyzeProjectedCustomMetricSubjects(
         options.extraction,
         options.clear_cache,
         &diagnostics,
+        options.logger,
     );
     defer graph.deinit(options.allocator);
     var projected_edges = try projection.projectEdges(options.allocator, &graph, target.mapper);
@@ -2707,12 +2731,27 @@ test "count shouldSatisfy receives the value and full file subject facts" {
         predicate_assertion.MetricPredicate.fromStateless(rejectMetricPredicate),
     );
     defer failing.deinit(std.testing.allocator);
-    var failed = try failing.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    var log_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer log_output.deinit();
+    var logged_options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    logged_options.logging = .{ .level = .debug, .writer = &log_output.writer };
+    var failed = try failing.check(logged_options);
     defer failed.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), failed.items().len);
     try std.testing.expectEqual(assertion.Violation.Kind.metric_predicate, failed.items()[0].kind());
     try std.testing.expectEqualStrings("functions", failed.items()[0].metric_predicate.metric_name);
     try std.testing.expectEqual(@as(u64, 1), failed.items()[0].metric_predicate.measured.unsigned);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[extraction] structural metrics extraction started",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, log_output.written(), "[violation] kind=metric_predicate") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[metric] name=functions value=1 subject=src/root.zig",
+    ) != null);
 }
 
 test "dependency count and ratio shouldSatisfy preserve numeric tags and coupling context" {

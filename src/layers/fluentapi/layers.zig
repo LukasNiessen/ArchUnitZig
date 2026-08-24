@@ -112,9 +112,16 @@ pub const LayeredArchitecture = struct {
         self: *const LayeredArchitecture,
         options: CheckOptions,
     ) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "layers.dependencies", performCheck);
+    }
+
+    fn performCheck(
+        self: *const LayeredArchitecture,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.project_locator,
@@ -122,6 +129,7 @@ pub const LayeredArchitecture = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);

@@ -214,7 +214,7 @@ pub const ProjectSlices = struct {
     pub fn toPlantUml(self: *const ProjectSlices, options: CheckOptions) anyerror![]u8 {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.project_locator,
@@ -222,6 +222,7 @@ pub const ProjectSlices = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.toPlantUmlGraph(options.allocator, &graph);
@@ -246,7 +247,7 @@ pub const ProjectSlices = struct {
     ) anyerror!void {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.project_locator,
@@ -254,6 +255,7 @@ pub const ProjectSlices = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         var labels = try self.projectLabels(options.allocator, &graph);
@@ -463,9 +465,16 @@ pub const DiagramAdherenceRule = struct {
         self: *const DiagramAdherenceRule,
         options: CheckOptions,
     ) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "slices.adhere_to_diagram", performCheck);
+    }
+
+    fn performCheck(
+        self: *const DiagramAdherenceRule,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.rule.scope.project_locator,
@@ -473,6 +482,7 @@ pub const DiagramAdherenceRule = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);
@@ -588,9 +598,16 @@ pub const SliceDependencyRule = struct {
         self: *const SliceDependencyRule,
         options: CheckOptions,
     ) anyerror!assertion.ViolationList {
+        return fluentapi.runLoggedCheck(self, options, "slices.dependency", performCheck);
+    }
+
+    fn performCheck(
+        self: *const SliceDependencyRule,
+        options: CheckOptions,
+    ) anyerror!assertion.ViolationList {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.rule.scope.project_locator,
@@ -598,6 +615,7 @@ pub const SliceDependencyRule = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return self.checkGraph(options, &graph);

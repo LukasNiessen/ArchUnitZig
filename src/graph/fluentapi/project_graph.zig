@@ -233,7 +233,7 @@ pub const ProjectGraphBuilder = struct {
     ) anyerror!GraphReportSnapshot {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
-        var graph = try extraction.extractProjectGraph(
+        var graph = try extraction.extractProjectGraphLogged(
             options.allocator,
             options.io,
             self.project_locator,
@@ -241,6 +241,7 @@ pub const ProjectGraphBuilder = struct {
             options.extraction,
             options.clear_cache,
             &diagnostics,
+            options.logger,
         );
         defer graph.deinit(options.allocator);
         return snapshot_factory.createSnapshot(options.allocator, &graph, self.queryOptions());

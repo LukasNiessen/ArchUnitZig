@@ -428,6 +428,71 @@ test "custom logger failures propagate and absolute subjects expose only their b
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "count?forged") != null);
 }
 
+test "logged check aborts on start failures and preserves an existing check failure" {
+    const Options = struct {
+        allocator: Allocator,
+        io: Io,
+        logging: ?LoggingOptions,
+        logger: ?*CheckLogger = null,
+    };
+    const Rule = struct {
+        checks: usize = 0,
+
+        fn pass(self: *@This(), _: Options) !assertion.ViolationList {
+            self.checks += 1;
+            return .{};
+        }
+
+        fn fail(self: *@This(), _: Options) !assertion.ViolationList {
+            self.checks += 1;
+            return error.MockCheckFailure;
+        }
+    };
+    const AlwaysFail = struct {
+        fn write(_: LogRecord) !void {
+            return error.MockLogSinkFailure;
+        }
+    };
+    var aborted = Rule{};
+    try std.testing.expectError(error.MockLogSinkFailure, runLoggedCheck(
+        &aborted,
+        Options{
+            .allocator = std.testing.allocator,
+            .io = std.testing.io,
+            .logging = .{
+                .logger = LogSink.fromStateless(AlwaysFail.write),
+                .clock = LogClock.fromStateless(fixedNow),
+            },
+        },
+        "mock.aborted",
+        Rule.pass,
+    ));
+    try std.testing.expectEqual(@as(usize, 0), aborted.checks);
+
+    const FailAtEnd = struct {
+        fn write(_: *@This(), record: LogRecord) !void {
+            if (record.event == .end_check) return error.MockLogSinkFailure;
+        }
+    };
+    var sink_context = FailAtEnd{};
+    var failing = Rule{};
+    try std.testing.expectError(error.MockCheckFailure, runLoggedCheck(
+        &failing,
+        Options{
+            .allocator = std.testing.allocator,
+            .io = std.testing.io,
+            .logging = .{
+                .level = .debug,
+                .logger = LogSink.fromContext(FailAtEnd, &sink_context, FailAtEnd.write),
+                .clock = LogClock.fromStateless(fixedNow),
+            },
+        },
+        "mock.failed",
+        Rule.fail,
+    ));
+    try std.testing.expectEqual(@as(usize, 1), failing.checks);
+}
+
 test "concurrent logger contexts keep independent sinks and lifecycle records" {
     const ThreadContext = struct {
         output: *Io.Writer,
