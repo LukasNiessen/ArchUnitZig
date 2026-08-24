@@ -231,6 +231,17 @@ pub const ProjectGraphBuilder = struct {
         self: *const ProjectGraphBuilder,
         options: CheckOptions,
     ) anyerror!GraphReportSnapshot {
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        return self.snapshotInternal(logged_options);
+    }
+
+    fn snapshotInternal(
+        self: *const ProjectGraphBuilder,
+        options: CheckOptions,
+    ) anyerror!GraphReportSnapshot {
         var diagnostics = common_error.ErrorContext.init(options.allocator);
         defer diagnostics.deinit();
         var graph = try extraction.extractProjectGraphLogged(
@@ -251,8 +262,12 @@ pub const ProjectGraphBuilder = struct {
         self: *const ProjectGraphBuilder,
         options: CheckOptions,
     ) anyerror!report.GraphReportSummary {
-        var report_snapshot = try self.snapshot(options);
-        defer report_snapshot.deinit(options.allocator);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var report_snapshot = try self.snapshotInternal(logged_options);
+        defer report_snapshot.deinit(logged_options.allocator);
         return report_snapshot.summary;
     }
 
@@ -261,9 +276,13 @@ pub const ProjectGraphBuilder = struct {
         options: CheckOptions,
         format: rendering.GraphReportFormat,
     ) anyerror![]u8 {
-        var report_snapshot = try self.snapshot(options);
-        defer report_snapshot.deinit(options.allocator);
-        return rendering.GraphRenderer.render(options.allocator, &report_snapshot, format);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var report_snapshot = try self.snapshotInternal(logged_options);
+        defer report_snapshot.deinit(logged_options.allocator);
+        return rendering.GraphRenderer.render(logged_options.allocator, &report_snapshot, format);
     }
 
     pub fn exportReport(
@@ -272,15 +291,20 @@ pub const ProjectGraphBuilder = struct {
         format: rendering.GraphReportFormat,
         output_path: []const u8,
     ) anyerror!void {
-        var report_snapshot = try self.snapshot(options);
-        defer report_snapshot.deinit(options.allocator);
-        return rendering.GraphRenderer.exportReport(
-            options.allocator,
-            options.io,
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var report_snapshot = try self.snapshotInternal(logged_options);
+        defer report_snapshot.deinit(logged_options.allocator);
+        try rendering.GraphRenderer.exportReport(
+            logged_options.allocator,
+            logged_options.io,
             &report_snapshot,
             format,
             output_path,
         );
+        if (logged_options.logger) |logger| try logger.logExport(@tagName(format), output_path);
     }
 
     pub fn toDot(self: *const ProjectGraphBuilder, options: CheckOptions) anyerror![]u8 {
@@ -776,7 +800,16 @@ test "real fixture fluent render and export terminals share the snapshot contrac
     );
     defer std.testing.allocator.free(output_path);
     options.clear_cache = false;
+    var log_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer log_output.deinit();
+    options.logging = .{ .level = .debug, .writer = &log_output.writer };
     try titled_builder.exportAsHtml(options, output_path);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[export] format=html file=architecture.html",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, log_output.written(), root) == null);
     const exported = try std.Io.Dir.cwd().readFileAllocOptions(
         std.testing.io,
         output_path,

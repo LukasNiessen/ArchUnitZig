@@ -713,9 +713,14 @@ pub const CountMetrics = struct {
         options: CheckOptions,
         export_options: report_export.MetricsExportOptions,
     ) anyerror![]u8 {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        return report_export.toHtml(logged_options.allocator, logged_options.io, &data, export_options);
     }
 
     pub fn exportAsHtml(
@@ -724,15 +729,21 @@ pub const CountMetrics = struct {
         output_path: []const u8,
         export_options: report_export.MetricsExportOptions,
     ) anyerror!void {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.exportAsHtml(
-            options.allocator,
-            options.io,
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        try report_export.exportAsHtml(
+            logged_options.allocator,
+            logged_options.io,
             &data,
             output_path,
             export_options,
         );
+        try logHtmlExport(logged_options, output_path);
     }
 
     fn selection(self: *const CountMetrics, metric: CountMetric) BuilderError!CountMetricSelection {
@@ -1018,9 +1029,14 @@ pub const DependencyMetrics = struct {
         options: CheckOptions,
         export_options: report_export.MetricsExportOptions,
     ) anyerror![]u8 {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        return report_export.toHtml(logged_options.allocator, logged_options.io, &data, export_options);
     }
 
     pub fn exportAsHtml(
@@ -1029,15 +1045,21 @@ pub const DependencyMetrics = struct {
         output_path: []const u8,
         export_options: report_export.MetricsExportOptions,
     ) anyerror!void {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.exportAsHtml(
-            options.allocator,
-            options.io,
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        try report_export.exportAsHtml(
+            logged_options.allocator,
+            logged_options.io,
             &data,
             output_path,
             export_options,
         );
+        try logHtmlExport(logged_options, output_path);
     }
 };
 
@@ -1554,9 +1576,14 @@ pub const CustomMetricSelection = struct {
         options: CheckOptions,
         export_options: report_export.MetricsExportOptions,
     ) anyerror![]u8 {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.toHtml(options.allocator, options.io, &data, export_options);
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        return report_export.toHtml(logged_options.allocator, logged_options.io, &data, export_options);
     }
 
     pub fn exportAsHtml(
@@ -1565,15 +1592,21 @@ pub const CustomMetricSelection = struct {
         output_path: []const u8,
         export_options: report_export.MetricsExportOptions,
     ) anyerror!void {
-        var data = try self.gatherReportData(options);
-        defer data.deinit(options.allocator);
-        return report_export.exportAsHtml(
-            options.allocator,
-            options.io,
+        var logged_options = options;
+        var session = fluentapi.LogSession{};
+        defer session.deinit();
+        try session.activate(&logged_options);
+        var data = try self.gatherReportData(logged_options);
+        defer data.deinit(logged_options.allocator);
+        try logReportMetrics(logged_options.logger, &data);
+        try report_export.exportAsHtml(
+            logged_options.allocator,
+            logged_options.io,
             &data,
             output_path,
             export_options,
         );
+        try logHtmlExport(logged_options, output_path);
     }
 
     pub fn shouldBeBelow(
@@ -1909,6 +1942,25 @@ fn writeMetricValue(writer: *std.Io.Writer, value: assertion.MetricValue) std.Io
         .unsigned => |number| try writer.print("{d}", .{number}),
         .floating => |number| try writer.print("{d}", .{number}),
     }
+}
+
+fn logReportMetrics(
+    logger: ?*fluentapi.CheckLogger,
+    data: *const report_data.MetricsReportData,
+) anyerror!void {
+    const active = logger orelse return;
+    for (data.items()) |section| {
+        for (section.items()) |entry| {
+            try active.logMetric(@tagName(section.kind), entry.value, entry.label);
+        }
+    }
+}
+
+fn logHtmlExport(options: CheckOptions, output_path: []const u8) anyerror!void {
+    const logger = options.logger orelse return;
+    const resolved = try report_export.resolveHtmlPath(options.allocator, output_path);
+    defer options.allocator.free(resolved);
+    try logger.logExport("html", resolved);
 }
 
 pub fn metrics(allocator: Allocator, options: ProjectOptions) BuilderError!MetricsScope {
@@ -2898,7 +2950,7 @@ test "metric predicate builder chains release every partial allocation" {
 }
 
 test "metric builders gather typed report data render HTML and export through one boundary" {
-    const options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
     var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
     defer root.deinit();
 
@@ -2953,6 +3005,9 @@ test "metric builders gather typed report data render HTML and export through on
     defer std.testing.allocator.free(tmp_root);
     const requested = try std.fs.path.join(std.testing.allocator, &.{ tmp_root, "nested", "counts" });
     defer std.testing.allocator.free(requested);
+    var log_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer log_output.deinit();
+    options.logging = .{ .level = .debug, .writer = &log_output.writer };
     try counts.exportAsHtml(
         options,
         requested,
@@ -2968,6 +3023,17 @@ test "metric builders gather typed report data render HTML and export through on
     );
     defer std.testing.allocator.free(written);
     try std.testing.expect(std.mem.indexOf(u8, written, "<title>Exported count report</title>") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[metric] name=count value=5 subject=subject_count",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        log_output.written(),
+        "[export] format=html file=counts.html",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, log_output.written(), tmp_root) == null);
 }
 
 fn exerciseMetricReportingAllocationFailures(allocator: Allocator) !void {
