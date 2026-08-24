@@ -54,6 +54,12 @@ pub fn build(b: *std.Build) void {
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.step.dependOn(&run_infrastructure_tests.step);
 
+    const format_check = b.addFmt(.{
+        .paths = &.{ "build.zig", "build.zig.zon", "src", "tests", "vendor" },
+        .check = true,
+    });
+
     const test_step = b.step("test", "Build and run the acceptance fixture tests");
     test_step.dependOn(&run_integration_tests.step);
+    test_step.dependOn(&format_check.step);
 }
