@@ -27,6 +27,8 @@ def main() -> None:
 
     for value in (
         "push:",
+        "branches:",
+        "- main",
         "pull_request:",
         "workflow_dispatch:",
         "contents: read",

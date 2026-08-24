@@ -19,9 +19,9 @@ the build installs it at `zig-out/docs-site`. `scripts/check_docs.py` runs befor
 ## Publishing contract
 
 `.github/workflows/ci.yml` builds and uploads an ordinary artifact in its Linux ReleaseSafe quality
-job on pushes, pull requests, and manual runs. That job needs no Pages configuration or secrets, so
-it remains usable in forks. The same artifact must pass the Debug compatibility matrix on Linux,
-Windows, and macOS before deployment.
+job on `main` pushes, pull requests, and manual runs. That job needs no Pages configuration or
+secrets, so it remains usable in forks. The same artifact must pass the Debug compatibility matrix
+on Linux, Windows, and macOS before deployment.
 
 Deployment runs only for a push to `main` in `LukasNiessen/ArchUnitZig`. The deploy job downloads the
 already-validated ordinary artifact, configures Pages, packages the Pages artifact, and deploys it

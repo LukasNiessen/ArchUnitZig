@@ -1204,9 +1204,10 @@ ZON hash or lock inputs in its key.
 Debug compatibility runs on current GitHub-hosted Linux, Windows, and macOS with `fail-fast` disabled,
 so one platform cannot conceal another platform's result. The Linux quality job explicitly checks
 formatting, runs the complete unit/acceptance/dogfood/README-consumer chain in `ReleaseSafe`, builds
-and validates the guide plus compiler API docs, and uploads their deployable artifact. Superseded
-runs for the same source repository and branch cancel through one normalized concurrency key; push
-and pull-request events may both start, but only the newest remains active.
+and validates the guide plus compiler API docs, and uploads their deployable artifact. CI runs for
+every pull request, manual dispatch, and `main` push. Feature-branch pushes are represented by their
+pull-request run, avoiding a canceled duplicate status set on the same commit. Superseded runs for
+the same Git reference cancel through the workflow concurrency key.
 
 Consequence: toolchain downloads are reproducible and tamper-evident, allocator and path behavior are
 exercised on the three supported runner families, documentation cannot deploy ahead of code quality,
