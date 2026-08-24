@@ -1092,3 +1092,30 @@ Consequence: release gates exercise realistic Zig-specific dependency forms with
 developer-cache state, intentional invalid inputs remain testable without making fixture builds
 meaningless, and the public facade is proven against both a clean architecture and its minimal
 violating twin.
+
+### D046 — Dogfood distinguishes production dependencies from test consumers
+
+The repository checks its own architecture through a separate test root that imports only the
+public `archunit` package. Its production corpus is explicit: `src/**` is analyzed while `build.zig`
+and `test/**` are extraction exclusions. The complete external acceptance fixture remains a
+separate gate, and its violating twin supplies the negative cycle proof. Strict layer assignment and
+a top-folder custom predicate together ensure that connected and isolated production files must
+belong to a named architecture area.
+
+Zig `test` declarations live in production source files and frequently import a higher-level helper
+or facade solely to test a leaf module. Treating those imports as production edges created thousands
+of elementary graph cycles even though the production build graph was acyclic. `DependencyReference`
+therefore records whether its builtin occurs lexically inside a `test` declaration, using Zig's AST
+node spans. `ExtractionOptions.include_test_imports` defaults to true so existing analysis and test-
+consumer architecture remain visible. Production dogfood explicitly sets it to false; ordinary
+`comptime` dependencies remain included. The option is encoded in the graph-cache key.
+
+Every enforced boundary has a deliberately stricter negative control. Controls assert the tagged
+violation and a concrete source, then render through `ResultFactory` and assert the same path in the
+plain-text result. The controls use real repository files except for the intentionally unreachable
+cycle fixture, whose purpose is precisely to prove the cycle rule without corrupting production.
+
+Consequence: `zig build test` is executable architecture documentation, false cycles from colocated
+unit-test scaffolding do not weaken the production policy, consumers can still choose to govern test
+imports, cache entries cannot mix the two semantics, and a silently inert dogfood rule fails its own
+negative control.
