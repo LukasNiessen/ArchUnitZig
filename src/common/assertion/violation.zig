@@ -9,6 +9,7 @@ const external_dependency_violation = @import("external_module_dependency_violat
 const layer_dependency_violation = @import("layer_dependency_violation.zig");
 const matching_violation = @import("matching_violation.zig");
 const metric_violation = @import("metric_violation.zig");
+const metric_predicate_violation = @import("metric_predicate_violation.zig");
 const slice_dependency_violation = @import("slice_dependency_violation.zig");
 
 const Allocator = std.mem.Allocator;
@@ -21,6 +22,7 @@ pub const ExternalModuleDependencyViolation = external_dependency_violation.Exte
 pub const LayerDependencyViolation = layer_dependency_violation.LayerDependencyViolation;
 pub const MatchingViolation = matching_violation.MatchingViolation;
 pub const MetricViolation = metric_violation.MetricViolation;
+pub const MetricPredicateViolation = metric_predicate_violation.MetricPredicateViolation;
 pub const SliceDependencyViolation = slice_dependency_violation.SliceDependencyViolation;
 
 /// Closed, data-only architecture disagreement. Formatters exhaustively switch on this union in
@@ -35,10 +37,11 @@ pub const Violation = union(enum) {
     layer_dependency: LayerDependencyViolation,
     matching: MatchingViolation,
     metric: MetricViolation,
+    metric_predicate: MetricPredicateViolation,
     slice_dependency: SliceDependencyViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || slice_dependency_violation.InitError || custom_file_violation.InitError || custom_metric_violation.InitError || metric_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || slice_dependency_violation.InitError || custom_file_violation.InitError || custom_metric_violation.InitError || metric_violation.InitError || metric_predicate_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
@@ -72,6 +75,12 @@ pub const Violation = union(enum) {
 
     pub fn fromMetricMove(payload: *MetricViolation) Violation {
         const result = Violation{ .metric = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
+    pub fn fromMetricPredicateMove(payload: *MetricPredicateViolation) Violation {
+        const result = Violation{ .metric_predicate = payload.* };
         payload.* = undefined;
         return result;
     }
@@ -115,6 +124,7 @@ pub const Violation = union(enum) {
             .layer_dependency => |value| .{ .layer_dependency = try value.clone(allocator) },
             .matching => |value| .{ .matching = try value.clone(allocator) },
             .metric => |value| .{ .metric = try value.clone(allocator) },
+            .metric_predicate => |value| .{ .metric_predicate = try value.clone(allocator) },
             .slice_dependency => |value| .{ .slice_dependency = try value.clone(allocator) },
         };
     }
@@ -130,6 +140,7 @@ pub const Violation = union(enum) {
             .layer_dependency => |*value| value.deinit(allocator),
             .matching => |*value| value.deinit(allocator),
             .metric => |*value| value.deinit(allocator),
+            .metric_predicate => |*value| value.deinit(allocator),
             .slice_dependency => |*value| value.deinit(allocator),
         }
         self.* = undefined;
@@ -147,6 +158,7 @@ pub const Violation = union(enum) {
             .layer_dependency => |left| left.eql(other.layer_dependency),
             .matching => |left| left.eql(other.matching),
             .metric => |left| left.eql(other.metric),
+            .metric_predicate => |left| left.eql(other.metric_predicate),
             .slice_dependency => |left| left.eql(other.slice_dependency),
         };
     }
@@ -163,6 +175,7 @@ fn formatterDispatchBoundary(violation: Violation) []const u8 {
         .layer_dependency => "format-layer-dependency-in-testing-layer",
         .matching => "format-matching-disagreement-in-testing-layer",
         .metric => "format-metric-threshold-in-testing-layer",
+        .metric_predicate => "format-metric-predicate-in-testing-layer",
         .slice_dependency => "format-slice-dependency-in-testing-layer",
     };
 }

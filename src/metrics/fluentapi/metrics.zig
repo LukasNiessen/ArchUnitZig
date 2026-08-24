@@ -6,6 +6,7 @@ const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
 const matching = @import("../../common/matching.zig");
 const projection = @import("../../common/projection.zig");
+const predicate_assertion = @import("../assertion/predicate.zig");
 const threshold_assertion = @import("../assertion/threshold.zig");
 const count_calculation = @import("../calculation/count.zig");
 const custom_calculation = @import("../calculation/custom.zig");
@@ -675,6 +676,13 @@ pub const CountMetricSelection = struct {
         return self.threshold(.above_or_equal, value);
     }
 
+    pub fn shouldSatisfy(
+        self: *const CountMetricSelection,
+        predicate: predicate_assertion.MetricPredicate,
+    ) BuilderError!MetricPredicateRule {
+        return metricPredicateRule(&self.scope, .{ .count = self.metric }, predicate);
+    }
+
     fn threshold(
         self: *const CountMetricSelection,
         comparison: assertion.MetricComparison,
@@ -900,6 +908,13 @@ pub const DependencyCountSelection = struct {
     pub fn shouldBeAboveOrEqual(self: *const DependencyCountSelection, value: usize) BuilderError!DependencyThresholdRule {
         return dependencyThreshold(&self.scope, self.metric, .above_or_equal, .{ .unsigned = @intCast(value) });
     }
+
+    pub fn shouldSatisfy(
+        self: *const DependencyCountSelection,
+        predicate: predicate_assertion.MetricPredicate,
+    ) BuilderError!MetricPredicateRule {
+        return metricPredicateRule(&self.scope, .{ .dependency = self.metric }, predicate);
+    }
 };
 
 pub const DependencyRatioSelection = struct {
@@ -929,6 +944,13 @@ pub const DependencyRatioSelection = struct {
     }
     pub fn shouldBeAboveOrEqual(self: *const DependencyRatioSelection, value: f64) BuilderError!DependencyThresholdRule {
         return self.threshold(.above_or_equal, value);
+    }
+
+    pub fn shouldSatisfy(
+        self: *const DependencyRatioSelection,
+        predicate: predicate_assertion.MetricPredicate,
+    ) BuilderError!MetricPredicateRule {
+        return metricPredicateRule(&self.scope, .{ .dependency = self.metric }, predicate);
     }
 
     fn threshold(
@@ -1087,6 +1109,114 @@ const FileEdgeProjection = struct {
         return .{ .source_label = edge.source, .target_label = edge.target };
     }
 };
+
+const BuiltInMetricSelection = union(enum) {
+    count: CountMetric,
+    dependency: DependencyMetricKind,
+
+    fn name(self: BuiltInMetricSelection) []const u8 {
+        return switch (self) {
+            .count => |metric| metric.name(),
+            .dependency => |metric| metric.name(),
+        };
+    }
+
+    fn ruleId(self: BuiltInMetricSelection) []const u8 {
+        return switch (self) {
+            .count => "metrics.count",
+            .dependency => "metrics.dependency",
+        };
+    }
+
+    fn sentenceFragment(self: BuiltInMetricSelection) []const u8 {
+        return switch (self) {
+            .count => "count",
+            .dependency => "dependency metric",
+        };
+    }
+
+    fn value(self: BuiltInMetricSelection, info: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+        return switch (self) {
+            .count => |metric| .{ .unsigned = @intCast(metric.measure(info.structural.?)) },
+            .dependency => |metric| dependencyValueFromFacts(metric, info.dependency orelse
+                return error.MissingDependencyMetricFacts),
+        };
+    }
+};
+
+/// Executable arbitrary predicate over one selected built-in metric. Predicate contexts are
+/// borrowed under the same lifetime contract as custom metric callbacks.
+pub const MetricPredicateRule = struct {
+    scope: MetricsScope,
+    metric: BuiltInMetricSelection,
+    predicate: predicate_assertion.MetricPredicate,
+
+    pub fn deinit(self: *MetricPredicateRule, _: Allocator) void {
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const MetricPredicateRule, allocator: Allocator) Allocator.Error![]u8 {
+        const scope_description = try self.scope.description(allocator);
+        defer allocator.free(scope_description);
+        return std.fmt.allocPrint(
+            allocator,
+            "{s} {s} {s} should satisfy its metric assertion",
+            .{ scope_description, self.metric.sentenceFragment(), self.metric.name() },
+        );
+    }
+
+    pub fn check(self: *const MetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        var analysis = try analyzeStructuralMetricSubjects(&self.scope, options);
+        defer analysis.deinit(options.allocator);
+        var evidence = try self.scope.scopePatterns(options.allocator);
+        defer evidence.deinit(options.allocator);
+        if (try assertion.guardEmptyTest(
+            options.allocator,
+            analysis.subjects.items.len,
+            options.allow_empty_tests,
+            self.metric.ruleId(),
+            evidence.items(),
+            .should,
+        )) |guarded| return guarded;
+
+        var subjects: std.ArrayList(predicate_assertion.MetricPredicateSubject) = .empty;
+        defer subjects.deinit(options.allocator);
+        try subjects.ensureTotalCapacity(options.allocator, analysis.subjects.items.len);
+        for (analysis.subjects.items) |info| {
+            subjects.appendAssumeCapacity(.{
+                .info = info,
+                .metric_name = self.metric.name(),
+                .value = try self.metric.value(info),
+            });
+        }
+        return predicate_assertion.gatherMetricPredicateViolations(
+            options.allocator,
+            subjects.items,
+            self.predicate,
+        );
+    }
+};
+
+fn metricPredicateRule(
+    scope: *const MetricsScope,
+    metric: BuiltInMetricSelection,
+    predicate: predicate_assertion.MetricPredicate,
+) BuilderError!MetricPredicateRule {
+    return .{ .scope = try scope.clone(), .metric = metric, .predicate = predicate };
+}
+
+fn dependencyValueFromFacts(
+    metric: DependencyMetricKind,
+    facts: custom_calculation.CustomDependencyFacts,
+) assertion.MetricValue {
+    return switch (metric) {
+        .afferent_coupling => .{ .unsigned = @intCast(facts.afferent_coupling) },
+        .efferent_coupling => .{ .unsigned = @intCast(facts.efferent_coupling) },
+        .instability => .{ .floating = facts.instability },
+        .coupling_factor => .{ .floating = facts.coupling_factor },
+    };
+}
 
 const ProjectedMetricTarget = struct {
     level: ProjectedTargetLevel,
@@ -1359,19 +1489,19 @@ fn analyzeCustomMetricSubjects(
     if (selection.projected_target) |target| {
         return analyzeProjectedCustomMetricSubjects(selection, target, options);
     }
-    return analyzeStructuralCustomMetricSubjects(selection, options);
+    return analyzeStructuralMetricSubjects(&selection.scope, options);
 }
 
-fn analyzeStructuralCustomMetricSubjects(
-    selection: *const CustomMetricSelection,
+fn analyzeStructuralMetricSubjects(
+    scope: *const MetricsScope,
     options: CheckOptions,
 ) anyerror!CustomMetricSubjectAnalysis {
-    var structural_analysis = try selection.scope.analyze(options);
+    var structural_analysis = try scope.analyze(options);
     errdefer structural_analysis.deinit(options.allocator);
     var dependency_analysis: ?dependency_calculation.DependencyMetricSnapshot = null;
     errdefer if (dependency_analysis) |*analysis| analysis.deinit(options.allocator);
-    if (selection.scope.target_level == .file) {
-        dependency_analysis = try extractFileDependencyMetrics(&selection.scope, options);
+    if (scope.target_level == .file) {
+        dependency_analysis = try extractFileDependencyMetrics(scope, options);
     }
 
     var subjects: std.ArrayList(custom_calculation.CustomMetricInfo) = .empty;
@@ -2180,6 +2310,231 @@ test "custom metric builder chains release every partial allocation" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         exerciseCustomMetricBuilderAllocationFailures,
+        .{},
+    );
+}
+
+fn countMatchesSubject(
+    _: Allocator,
+    value: assertion.MetricValue,
+    info: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    if (info.target_kind != .file or info.structural == null or info.dependency == null) {
+        return error.IncompleteCountPredicateContext;
+    }
+    return value.unsigned == info.structural.?.functions;
+}
+
+fn atMostOneDependency(
+    _: Allocator,
+    value: assertion.MetricValue,
+    info: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    if (info.dependency == null) return error.MissingDependencyPredicateContext;
+    return value.unsigned <= 1;
+}
+
+fn stableEnough(
+    _: Allocator,
+    value: assertion.MetricValue,
+    info: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    if (info.dependency == null) return error.MissingDependencyPredicateContext;
+    return value.floating < 0.5;
+}
+
+fn failMetricPredicate(
+    _: Allocator,
+    _: assertion.MetricValue,
+    _: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    return error.MetricPredicateFailed;
+}
+
+fn acceptMetricPredicate(
+    _: Allocator,
+    _: assertion.MetricValue,
+    _: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    return true;
+}
+
+fn rejectMetricPredicate(
+    _: Allocator,
+    _: assertion.MetricValue,
+    _: predicate_assertion.MetricPredicateInfo,
+) !bool {
+    return false;
+}
+
+test "count shouldSatisfy receives the value and full file subject facts" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/root.zig"});
+    defer selected.deinit();
+    var counts = try selected.count();
+    defer counts.deinit();
+    var functions = try counts.functions();
+    defer functions.deinit();
+    var passing = try functions.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(countMatchesSubject),
+    );
+    defer passing.deinit(std.testing.allocator);
+    var result = try passing.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+
+    var failing = try functions.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(rejectMetricPredicate),
+    );
+    defer failing.deinit(std.testing.allocator);
+    var failed = try failing.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer failed.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), failed.items().len);
+    try std.testing.expectEqual(assertion.Violation.Kind.metric_predicate, failed.items()[0].kind());
+    try std.testing.expectEqualStrings("functions", failed.items()[0].metric_predicate.metric_name);
+    try std.testing.expectEqual(@as(u64, 1), failed.items()[0].metric_predicate.measured.unsigned);
+}
+
+test "dependency count and ratio shouldSatisfy preserve numeric tags and coupling context" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var dependencies = try selected.dependency();
+    defer dependencies.deinit();
+
+    var efferent = try dependencies.efferentCoupling();
+    defer efferent.deinit();
+    var count_rule = try efferent.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(atMostOneDependency),
+    );
+    defer count_rule.deinit(std.testing.allocator);
+    var count_result = try count_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer count_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u64, 2), count_result.items()[0].metric_predicate.measured.unsigned);
+
+    var instability_selection = try dependencies.instability();
+    defer instability_selection.deinit();
+    var ratio_rule = try instability_selection.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(stableEnough),
+    );
+    defer ratio_rule.deinit(std.testing.allocator);
+    var ratio_result = try ratio_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer ratio_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(f64, 1.0), ratio_result.items()[0].metric_predicate.measured.floating);
+    try std.testing.expectEqual(assertion.MetricTargetKind.file, ratio_result.items()[0].metric_predicate.target_kind);
+}
+
+test "built-in metric predicates propagate errors and guard empty selections first" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/root.zig"});
+    defer selected.deinit();
+    var counts = try selected.count();
+    defer counts.deinit();
+    var functions = try counts.functions();
+    defer functions.deinit();
+    var failing = try functions.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(failMetricPredicate),
+    );
+    defer failing.deinit(std.testing.allocator);
+    try std.testing.expectError(
+        error.MetricPredicateFailed,
+        failing.check(CheckOptions.init(std.testing.allocator, std.testing.io)),
+    );
+
+    var missing = try root.withName(&.{.{ .glob = "missing.zig" }});
+    defer missing.deinit();
+    var missing_counts = try missing.count();
+    defer missing_counts.deinit();
+    var tokens = try missing_counts.tokens();
+    defer tokens.deinit();
+    var guarded = try tokens.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(failMetricPredicate),
+    );
+    defer guarded.deinit(std.testing.allocator);
+    var guarded_result = try guarded.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer guarded_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, guarded_result.items()[0].kind());
+}
+
+test "built-in metric predicate terminals repeat and erase as Checkable" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/root.zig"});
+    defer selected.deinit();
+    var counts = try selected.count();
+    defer counts.deinit();
+    var functions = try counts.functions();
+    defer functions.deinit();
+    var terminal = try functions.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(acceptMetricPredicate),
+    );
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    const sentence = try erased.description(std.testing.allocator);
+    defer std.testing.allocator.free(sentence);
+    try std.testing.expectEqualStrings(
+        "Zig project files, in file \"src/root.zig\" count functions should satisfy its metric assertion",
+        sentence,
+    );
+    var first_result = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer first_result.deinit(std.testing.allocator);
+    var second_result = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer second_result.deinit(std.testing.allocator);
+    try std.testing.expect(first_result.passes());
+    try std.testing.expect(second_result.passes());
+}
+
+fn assertExactMetricTerminals(comptime Selection: type) void {
+    comptime {
+        const required = .{
+            "shouldBeBelow",
+            "shouldBeAbove",
+            "shouldBe",
+            "shouldBeBelowOrEqual",
+            "shouldBeAboveOrEqual",
+            "shouldSatisfy",
+        };
+        for (required) |name| {
+            if (!@hasDecl(Selection, name)) @compileError(@typeName(Selection) ++ " is missing " ++ name);
+        }
+        const forbidden = .{ "shouldEqual", "atMost", "atLeast", "between", "shouldMeet" };
+        for (forbidden) |name| {
+            if (@hasDecl(Selection, name)) @compileError(@typeName(Selection) ++ " exposes forbidden synonym " ++ name);
+        }
+    }
+}
+
+test "metric selections expose exactly the intended six assertion verbs without synonyms" {
+    assertExactMetricTerminals(CountMetricSelection);
+    assertExactMetricTerminals(DependencyCountSelection);
+    assertExactMetricTerminals(DependencyRatioSelection);
+    assertExactMetricTerminals(CustomMetricSelection);
+}
+
+fn exerciseMetricPredicateBuilderAllocationFailures(allocator: Allocator) !void {
+    var root = try metrics(allocator, .{ .locator = "fixture" });
+    defer root.deinit();
+    var selected = try root.inPath(&.{.{ .glob = "src/**" }});
+    defer selected.deinit();
+    var counts = try selected.count();
+    defer counts.deinit();
+    var functions = try counts.functions();
+    defer functions.deinit();
+    var terminal = try functions.shouldSatisfy(
+        predicate_assertion.MetricPredicate.fromStateless(acceptMetricPredicate),
+    );
+    defer terminal.deinit(allocator);
+    const sentence = try terminal.description(allocator);
+    defer allocator.free(sentence);
+}
+
+test "metric predicate builder chains release every partial allocation" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseMetricPredicateBuilderAllocationFailures,
         .{},
     );
 }

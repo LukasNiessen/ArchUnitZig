@@ -61,6 +61,7 @@ pub const ViolationFactory = struct {
             .layer_dependency => |value| formatLayerDependency(allocator, value, rule_sentence),
             .matching => |value| formatMatching(allocator, value, rule_sentence),
             .metric => |value| formatMetric(allocator, value, rule_sentence),
+            .metric_predicate => |value| formatMetricPredicate(allocator, value, rule_sentence),
             .slice_dependency => |value| formatSliceDependency(allocator, value, rule_sentence),
         };
     }
@@ -120,6 +121,23 @@ fn formatMetric(
         return error.OutOfMemory;
     writeMetricValue(&output.writer, value.threshold) catch return error.OutOfMemory;
     return finish(allocator, "Metric threshold violation", "metric", value.target_identifier, &output);
+}
+
+fn formatMetricPredicate(
+    allocator: Allocator,
+    value: assertion.MetricPredicateViolation,
+    rule_sentence: []const u8,
+) FormatError!FormattedViolation {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeRule(&output.writer, rule_sentence) catch return error.OutOfMemory;
+    output.writer.print(
+        "\nTarget: {s} ({s})\nMetric: {s}\nMeasured: ",
+        .{ value.target_identifier, @tagName(value.target_kind), value.metric_name },
+    ) catch return error.OutOfMemory;
+    writeMetricValue(&output.writer, value.measured) catch return error.OutOfMemory;
+    output.writer.writeAll("\nExpected: satisfy the metric assertion") catch return error.OutOfMemory;
+    return finish(allocator, "Metric predicate violation", "metric_predicate", value.target_identifier, &output);
 }
 
 fn formatCustomMetric(
@@ -1080,6 +1098,35 @@ test "metric formatter preserves target value comparison and threshold" {
             "Metric: functions\n" ++
             "Measured: 7\n" ++
             "Expected: below or equal to 5",
+        formatted.details,
+    );
+}
+
+test "metric predicate formatter preserves target and measured value without fake threshold data" {
+    var payload = try assertion.MetricPredicateViolation.init(
+        std.testing.allocator,
+        "src/model.zig:Order",
+        .declaration,
+        "tokens",
+        .{ .signed = -3 },
+    );
+    var violation = assertion.Violation.fromMetricPredicateMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "selected Zig declarations count tokens should satisfy its metric assertion",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Metric predicate violation", formatted.heading);
+    try std.testing.expectEqualStrings("metric_predicate:src/model.zig:Order", formatted.sort_key);
+    try std.testing.expectEqualStrings(
+        "Rule: selected Zig declarations count tokens should satisfy its metric assertion\n" ++
+            "Target: src/model.zig:Order (declaration)\n" ++
+            "Metric: tokens\n" ++
+            "Measured: -3\n" ++
+            "Expected: satisfy the metric assertion",
         formatted.details,
     );
 }

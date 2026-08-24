@@ -145,6 +145,13 @@ for module or slice subjects; mapped internal self-edges define the complete lab
 [D040](docs/decisions.md#d040--custom-metrics-cross-a-scalar-only-borrowed-callback-boundary) for
 the lifetime, projection, and numeric contracts.
 
+Every metric selection exposes exactly six assertion terminals: `shouldBeBelow`, `shouldBeAbove`,
+`shouldBe`, `shouldBeBelowOrEqual`, `shouldBeAboveOrEqual`, and `shouldSatisfy`. Built-in predicates
+receive the measured `MetricValue` and the same allocator-safe subject context as custom predicates.
+Integer thresholds retain signed/unsigned precision, floating thresholds must be finite, and mixed
+integer/floating comparisons are rejected instead of coerced. [D041](docs/decisions.md#d041--metric-selections-have-five-threshold-verbs-and-one-predicate-verb)
+records the evidence and vocabulary contract.
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.

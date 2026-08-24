@@ -8,6 +8,10 @@ pub const extractProjectInfo = @import("metrics/extraction/structural.zig").extr
 pub const inspectSource = @import("metrics/extraction/structural.zig").inspectSource;
 pub const ComparisonError = @import("metrics/assertion/threshold.zig").ComparisonError;
 pub const passesThreshold = @import("metrics/assertion/threshold.zig").passes;
+pub const MetricPredicate = @import("metrics/assertion/predicate.zig").MetricPredicate;
+pub const MetricPredicateInfo = @import("metrics/assertion/predicate.zig").MetricPredicateInfo;
+pub const MetricPredicateSubject = @import("metrics/assertion/predicate.zig").MetricPredicateSubject;
+pub const gatherMetricPredicateViolations = @import("metrics/assertion/predicate.zig").gatherMetricPredicateViolations;
 pub const CountMetric = @import("metrics/calculation/count.zig").CountMetric;
 pub const DependencyMetricInfo = @import("metrics/calculation/dependency.zig").DependencyMetricInfo;
 pub const DependencyMetricSnapshot = @import("metrics/calculation/dependency.zig").DependencyMetricSnapshot;
@@ -36,6 +40,7 @@ pub const CountMetricSelection = @import("metrics/fluentapi/metrics.zig").CountM
 pub const MetricMeasurement = @import("metrics/fluentapi/metrics.zig").MetricMeasurement;
 pub const MetricMeasurements = @import("metrics/fluentapi/metrics.zig").MetricMeasurements;
 pub const MetricThresholdRule = @import("metrics/fluentapi/metrics.zig").MetricThresholdRule;
+pub const MetricPredicateRule = @import("metrics/fluentapi/metrics.zig").MetricPredicateRule;
 pub const DependencyMetricKind = @import("metrics/fluentapi/metrics.zig").DependencyMetricKind;
 pub const DependencyMetrics = @import("metrics/fluentapi/metrics.zig").DependencyMetrics;
 pub const DependencySummary = @import("metrics/fluentapi/metrics.zig").DependencySummary;
@@ -51,6 +56,7 @@ pub const metrics = @import("metrics/fluentapi/metrics.zig").metrics;
 
 test {
     _ = @import("metrics/assertion/threshold.zig");
+    _ = @import("metrics/assertion/predicate.zig");
     _ = @import("metrics/calculation/count.zig");
     _ = @import("metrics/calculation/dependency.zig");
     _ = @import("metrics/calculation/custom.zig");
