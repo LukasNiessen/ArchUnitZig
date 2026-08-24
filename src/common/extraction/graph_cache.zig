@@ -12,12 +12,13 @@ pub const BuildGraphMode = extraction_options.BuildGraphMode;
 pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const Graph = graph_module.Graph;
 
-const cache_key_schema_version: u64 = 1;
+const cache_key_schema_version: u64 = 2;
 const keyed_option_fields = [_][]const u8{
     "exclusions",
     "strictness",
     "include_resources",
     "include_c_imports",
+    "include_test_imports",
     "module_resolution",
     "build_graph_mode",
 };
@@ -92,6 +93,7 @@ fn appendKey(
     try appendU64(allocator, encoded, @intFromEnum(options.strictness));
     try encoded.append(allocator, @intFromBool(options.include_resources));
     try encoded.append(allocator, @intFromBool(options.include_c_imports));
+    try encoded.append(allocator, @intFromBool(options.include_test_imports));
     try appendU64(allocator, encoded, @intFromEnum(options.build_graph_mode));
 
     try appendU64(allocator, encoded, options.exclusions.len);
@@ -290,6 +292,7 @@ test "canonical roots produce equal keys and every option separates keys" {
         .{ .strictness = .permissive },
         .{ .include_resources = false },
         .{ .include_c_imports = false },
+        .{ .include_test_imports = false },
         .{ .module_resolution = .{ .compilation_units = &units } },
         .{ .build_graph_mode = .disabled },
     };

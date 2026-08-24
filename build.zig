@@ -58,12 +58,23 @@ pub fn build(b: *std.Build) void {
     const run_acceptance_tests = b.addRunArtifact(acceptance_tests);
     run_acceptance_tests.setCwd(b.path("."));
 
+    const dogfood = b.createModule(.{
+        .root_source_file = b.path("test/dogfood.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dogfood.addImport("archunit", archunit);
+    const dogfood_tests = b.addTest(.{ .root_module = dogfood });
+    dogfood_tests.step.dependOn(&run_acceptance_tests.step);
+    const run_dogfood_tests = b.addRunArtifact(dogfood_tests);
+    run_dogfood_tests.setCwd(b.path("."));
+
     const format_check = b.addFmt(.{
-        .paths = &.{ "build.zig", "build.zig.zon", "src", "test/acceptance.zig" },
+        .paths = &.{ "build.zig", "build.zig.zon", "src", "test/acceptance.zig", "test/dogfood.zig" },
         .check = true,
     });
 
     const test_step = b.step("test", "Run formatting checks and tests");
     test_step.dependOn(&format_check.step);
-    test_step.dependOn(&run_acceptance_tests.step);
+    test_step.dependOn(&run_dogfood_tests.step);
 }

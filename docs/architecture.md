@@ -109,7 +109,42 @@ root.zig
 - `testing` formats common/domain violation data and exposes `std.testing` helpers.
 - `root.zig` is a facade. Internal code never imports it.
 
-The repository will enforce these rules against itself after the files API lands.
+These boundaries are enforced against the repository by the external dogfood suite described below.
+
+## Executable dogfood architecture
+
+`test/dogfood.zig` imports only the public `archunit` package and runs after the external acceptance
+suite in `zig build test`. Its project locator and working directory are both `.`, exactly as they
+would be for a consumer checking its own repository. The production corpus deliberately excludes
+`build.zig` and `test/**`; the latter is the explicit exclusion for all test fixtures rather than an
+accidental consequence of nested-project discovery. The separate negative cycle control enters the
+violating acceptance fixture through its own working directory and excludes only its malformed
+`testdata/**` subtree.
+
+| Executable rule | Production contract | Negative control |
+| --- | --- | --- |
+| Common internal dependencies | `src/common/**` depends only on `src/common/**` | `src/common/error.zig` is checked against an intentionally incomplete assertion-only allowlist |
+| Common external dependencies | only Zig `std` and the approved `regex` backend | removing `regex` reports `src/common/matching/regex.zig` |
+| Named layers | `common`; independent `files`, `graph`, `layers`, `metrics`, and `slices` domains; `testing`; public root | removing `common` from the `files` allowlist reports a concrete files-domain source |
+| Testing boundary | testing code reads only `common` plus its own files; violation data lives in `common` | excluding `common` reports `src/testing/cycle_path.zig` |
+| Public facade | no production file other than `src/root.zig` depends on `src/root.zig` | forbidding a known common projection file proves the same dependency predicate reports its consumer |
+| Production cycles | the production dependency graph has no cycles | the unreachable two-file cycle in the violating fixture reports `src/cycles/a.zig` |
+| Folder ownership | every folder immediately below `src/` is named by the architecture | omitting `graph` reports `src/graph/fluentapi/project_graph.zig` |
+
+Layer assignment is strict, so a connected production file cannot evade the named-layer rules by
+living outside every selector. A separate custom file rule covers isolated files too. Same-layer
+dependencies are implicit; domain allowlists name only `common`, while the public root may read all
+domains. Every negative control checks structured violation data and then sends it through
+`ResultFactory` to prove that the concrete source path survives into human-readable output.
+
+Zig colocates unit tests with production declarations. Imports inside those `test` declarations are
+real architecture consumers, so extraction includes them by default and acceptance tests continue
+to cover that behavior. They are not production dependencies, however, and unit-test helpers often
+import the facade that is exercising their leaf module. The dogfood corpus therefore sets
+`ExtractionOptions.include_test_imports = false`. The parser records this lexical context from the
+Zig AST, the graph cache keys the option, and imports from ordinary `comptime` blocks remain in the
+production graph. This avoids hundreds of local suppression annotations without hiding compile-time
+production coupling.
 
 ## Extraction strategy
 

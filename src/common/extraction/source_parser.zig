@@ -20,6 +20,9 @@ pub const DependencyReference = struct {
     target: []const u8,
     kind: ImportKind,
     location: SourceLocation,
+    /// True when the builtin is lexically contained by a Zig `test` declaration. Extraction keeps
+    /// these references by default; production-only graph consumers may opt out explicitly.
+    inside_test_declaration: bool = false,
 
     pub fn deinit(self: *DependencyReference, allocator: Allocator) void {
         allocator.free(self.target);
@@ -169,12 +172,25 @@ pub fn parseSource(
             .target = decoded,
             .kind = reference_kind,
             .location = start_location,
+            .inside_test_declaration = insideTestDeclaration(&tree, index),
         }) catch {
             allocator.free(decoded);
             return error_context.failTechnical(.out_of_memory, "zig.parse_source", source_path, error.OutOfMemory);
         };
     }
     return result;
+}
+
+fn insideTestDeclaration(tree: *const std.zig.Ast, candidate: usize) bool {
+    const candidate_token: std.zig.Ast.TokenIndex = @intCast(candidate);
+    for (0..tree.nodes.len) |raw_index| {
+        const node: std.zig.Ast.Node.Index = @enumFromInt(raw_index);
+        if (tree.nodeTag(node) != .test_decl) continue;
+        if (candidate_token >= tree.firstToken(node) and candidate_token <= tree.lastToken(node)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn countTopLevelDeclarations(tree: *const std.zig.Ast) TopLevelDeclarationCounts {
@@ -263,6 +279,8 @@ test "extracts imports across Zig constructs and decodes escaped literals" {
     try std.testing.expectEqual(ImportKind.zig_file, result.references.items[2].kind);
     try std.testing.expectEqual(ImportKind.zon_file, result.references.items[3].kind);
     try std.testing.expectEqual(ImportKind.named_module, result.references.items[4].kind);
+    try std.testing.expect(!result.references.items[3].inside_test_declaration);
+    try std.testing.expect(result.references.items[4].inside_test_declaration);
     try std.testing.expectEqual(@as(usize, 1), result.references.items[0].location.line);
 }
 

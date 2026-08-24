@@ -17,6 +17,10 @@ pub const ExtractionOptions = struct {
     include_resources: bool = true,
     /// Whether headers named by `@cInclude` participate in the graph.
     include_c_imports: bool = true,
+    /// Whether imports lexically contained by Zig `test` declarations participate in the graph.
+    /// Enabled by default because tests are architecture consumers; production-only policies can
+    /// disable it without suppressing imports from ordinary `comptime` blocks.
+    include_test_imports: bool = true,
     /// Explicit compilation-root and named-module bindings; build scripts are never executed.
     module_resolution: module_resolver.ModuleResolutionOverrides = .{},
     /// Selects the build-graph source without implying unsupported build-script interpretation.
