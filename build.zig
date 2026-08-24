@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const python = b.findProgram(&.{ "python3", "python" }, &.{}) catch "python";
 
     const archunit = b.addModule("archunit", .{
         .root_source_file = b.path("src/root.zig"),
@@ -113,7 +114,7 @@ pub fn build(b: *std.Build) void {
     docs_library.step.dependOn(&run_readme_tests.step);
 
     const build_docs = b.addSystemCommand(&.{
-        "python",
+        python,
         "scripts/build_docs.py",
         "--root",
     });
@@ -124,7 +125,7 @@ pub fn build(b: *std.Build) void {
     build_docs.addDirectoryArg(docs_library.getEmittedDocs());
 
     const check_docs = b.addSystemCommand(&.{
-        "python",
+        python,
         "scripts/check_docs.py",
         "--root",
     });
