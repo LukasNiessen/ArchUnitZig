@@ -8,6 +8,7 @@ const matching = @import("../../common/matching.zig");
 const projection = @import("../../common/projection.zig");
 const threshold_assertion = @import("../assertion/threshold.zig");
 const count_calculation = @import("../calculation/count.zig");
+const custom_calculation = @import("../calculation/custom.zig");
 const dependency_calculation = @import("../calculation/dependency.zig");
 const structural = @import("../extraction/structural.zig");
 
@@ -22,8 +23,11 @@ pub const StructuralMetrics = structural.StructuralMetrics;
 pub const BuilderError = Allocator.Error || error{
     InvalidPattern,
     InvalidProjectPath,
+    InvalidMetricDescription,
+    InvalidMetricName,
     InvalidThreshold,
     UnsupportedDependencyTarget,
+    UnsupportedProjectedSelectors,
 };
 
 pub const ProjectOptions = struct {
@@ -40,6 +44,25 @@ pub const TargetLevel = enum {
             .file => .file,
             .declaration => .declaration,
             .container => .container,
+        };
+    }
+};
+
+pub const ProjectedTargetLevel = enum {
+    module,
+    slice,
+
+    pub fn targetKind(self: ProjectedTargetLevel) assertion.MetricTargetKind {
+        return switch (self) {
+            .module => .module,
+            .slice => .slice,
+        };
+    }
+
+    pub fn pluralName(self: ProjectedTargetLevel) []const u8 {
+        return switch (self) {
+            .module => "modules",
+            .slice => "slices",
         };
     }
 };
@@ -310,6 +333,39 @@ pub const MetricsScope = struct {
     pub fn dependency(self: *const MetricsScope) BuilderError!DependencyMetrics {
         if (self.target_level != .file) return error.UnsupportedDependencyTarget;
         return .{ .scope = try self.clone() };
+    }
+
+    /// Defines a custom metric over the scope's current file, declaration, or container subjects.
+    /// Calculation contexts are borrowed and must outlive the selection and all derived rules.
+    pub fn customMetric(
+        self: *const MetricsScope,
+        name: []const u8,
+        description_value: []const u8,
+        calculation: custom_calculation.CustomMetricCalculation,
+    ) BuilderError!CustomMetricSelection {
+        return CustomMetricSelection.initStructural(self, name, description_value, calculation);
+    }
+
+    /// Defines a custom metric over caller-projected module or slice labels. The mapper is borrowed
+    /// by value; any context inside it must outlive the selection and every derived rule. Internal
+    /// projected self-edges establish the complete subject universe.
+    pub fn customMetricForProjection(
+        self: *const MetricsScope,
+        target_level: ProjectedTargetLevel,
+        mapper: projection.MapFunction,
+        name: []const u8,
+        description_value: []const u8,
+        calculation: custom_calculation.CustomMetricCalculation,
+    ) BuilderError!CustomMetricSelection {
+        if (self.selectors.items.len != 0) return error.UnsupportedProjectedSelectors;
+        return CustomMetricSelection.initProjected(
+            self,
+            target_level,
+            mapper,
+            name,
+            description_value,
+            calculation,
+        );
     }
 
     pub fn analyze(self: *const MetricsScope, options: CheckOptions) anyerror!MetricAnalysis {
@@ -1032,6 +1088,426 @@ const FileEdgeProjection = struct {
     }
 };
 
+const ProjectedMetricTarget = struct {
+    level: ProjectedTargetLevel,
+    mapper: projection.MapFunction,
+};
+
+/// Owned custom metric definition and lazy subject source. Name and description storage belong to
+/// this selection; callback and mapper contexts remain explicitly borrowed.
+pub const CustomMetricSelection = struct {
+    scope: MetricsScope,
+    name: []u8,
+    description_value: []u8,
+    calculation: custom_calculation.CustomMetricCalculation,
+    projected_target: ?ProjectedMetricTarget = null,
+
+    fn initStructural(
+        scope: *const MetricsScope,
+        name: []const u8,
+        description_value: []const u8,
+        calculation: custom_calculation.CustomMetricCalculation,
+    ) BuilderError!CustomMetricSelection {
+        return initOwned(scope, name, description_value, calculation, null);
+    }
+
+    fn initProjected(
+        scope: *const MetricsScope,
+        level: ProjectedTargetLevel,
+        mapper: projection.MapFunction,
+        name: []const u8,
+        description_value: []const u8,
+        calculation: custom_calculation.CustomMetricCalculation,
+    ) BuilderError!CustomMetricSelection {
+        return initOwned(
+            scope,
+            name,
+            description_value,
+            calculation,
+            .{ .level = level, .mapper = mapper },
+        );
+    }
+
+    fn initOwned(
+        scope: *const MetricsScope,
+        name: []const u8,
+        description_value: []const u8,
+        calculation: custom_calculation.CustomMetricCalculation,
+        projected_target: ?ProjectedMetricTarget,
+    ) BuilderError!CustomMetricSelection {
+        if (!hasText(name)) return error.InvalidMetricName;
+        if (!hasText(description_value)) return error.InvalidMetricDescription;
+        var owned_scope = try scope.clone();
+        errdefer owned_scope.deinit();
+        const owned_name = try scope.allocator.dupe(u8, name);
+        errdefer scope.allocator.free(owned_name);
+        return .{
+            .scope = owned_scope,
+            .name = owned_name,
+            .description_value = try scope.allocator.dupe(u8, description_value),
+            .calculation = calculation,
+            .projected_target = projected_target,
+        };
+    }
+
+    pub fn clone(self: *const CustomMetricSelection) BuilderError!CustomMetricSelection {
+        return initOwned(
+            &self.scope,
+            self.name,
+            self.description_value,
+            self.calculation,
+            self.projected_target,
+        );
+    }
+
+    pub fn deinit(self: *CustomMetricSelection) void {
+        const allocator = self.scope.allocator;
+        allocator.free(self.name);
+        allocator.free(self.description_value);
+        self.scope.deinit();
+        self.* = undefined;
+    }
+
+    pub fn metricName(self: *const CustomMetricSelection) []const u8 {
+        return self.name;
+    }
+
+    pub fn metricDescription(self: *const CustomMetricSelection) []const u8 {
+        return self.description_value;
+    }
+
+    pub fn targetKind(self: *const CustomMetricSelection) assertion.MetricTargetKind {
+        if (self.projected_target) |target| return target.level.targetKind();
+        return self.scope.target_level.violationKind();
+    }
+
+    pub fn measure(
+        self: *const CustomMetricSelection,
+        options: CheckOptions,
+    ) anyerror!custom_calculation.CustomMetricMeasurements {
+        var analysis = try analyzeCustomMetricSubjects(self, options);
+        defer analysis.deinit(options.allocator);
+        return custom_calculation.measure(options.allocator, analysis.subjects.items, self.definition());
+    }
+
+    pub fn shouldBeBelow(
+        self: *const CustomMetricSelection,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        return self.threshold(.below, threshold_value);
+    }
+
+    pub fn shouldBeAbove(
+        self: *const CustomMetricSelection,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        return self.threshold(.above, threshold_value);
+    }
+
+    pub fn shouldBe(
+        self: *const CustomMetricSelection,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        return self.threshold(.equal, threshold_value);
+    }
+
+    pub fn shouldBeBelowOrEqual(
+        self: *const CustomMetricSelection,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        return self.threshold(.below_or_equal, threshold_value);
+    }
+
+    pub fn shouldBeAboveOrEqual(
+        self: *const CustomMetricSelection,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        return self.threshold(.above_or_equal, threshold_value);
+    }
+
+    pub fn shouldSatisfy(
+        self: *const CustomMetricSelection,
+        predicate: custom_calculation.CustomMetricPredicate,
+    ) BuilderError!CustomMetricPredicateRule {
+        return .{ .selection = try self.clone(), .predicate = predicate };
+    }
+
+    fn threshold(
+        self: *const CustomMetricSelection,
+        comparison: assertion.MetricComparison,
+        threshold_value: assertion.MetricValue,
+    ) BuilderError!CustomMetricThresholdRule {
+        custom_calculation.validateValue(threshold_value) catch return error.InvalidThreshold;
+        return .{
+            .selection = try self.clone(),
+            .comparison = comparison,
+            .threshold_value = threshold_value,
+        };
+    }
+
+    fn definition(self: *const CustomMetricSelection) custom_calculation.CustomMetricDefinition {
+        return .{
+            .name = self.name,
+            .description = self.description_value,
+            .calculation = self.calculation,
+        };
+    }
+
+    fn subjectDescription(self: *const CustomMetricSelection, allocator: Allocator) Allocator.Error![]u8 {
+        if (self.projected_target) |target| {
+            return std.fmt.allocPrint(allocator, "projected Zig {s}", .{target.level.pluralName()});
+        }
+        return self.scope.description(allocator);
+    }
+};
+
+pub const CustomMetricThresholdRule = struct {
+    selection: CustomMetricSelection,
+    comparison: assertion.MetricComparison,
+    threshold_value: assertion.MetricValue,
+
+    pub fn deinit(self: *CustomMetricThresholdRule, _: Allocator) void {
+        self.selection.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const CustomMetricThresholdRule, allocator: Allocator) Allocator.Error![]u8 {
+        const subjects = try self.selection.subjectDescription(allocator);
+        defer allocator.free(subjects);
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        output.writer.print(
+            "{s} custom metric {s} ({s}) should be {s} ",
+            .{
+                subjects,
+                self.selection.name,
+                self.selection.description_value,
+                comparisonPhrase(self.comparison),
+            },
+        ) catch return error.OutOfMemory;
+        writeMetricValue(&output.writer, self.threshold_value) catch return error.OutOfMemory;
+        return output.toOwnedSlice();
+    }
+
+    pub fn check(self: *const CustomMetricThresholdRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        var analysis = try analyzeCustomMetricSubjects(&self.selection, options);
+        defer analysis.deinit(options.allocator);
+        if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
+            return guarded;
+        }
+        return custom_calculation.gatherThresholdViolations(
+            options.allocator,
+            analysis.subjects.items,
+            self.selection.definition(),
+            self.comparison,
+            self.threshold_value,
+        );
+    }
+};
+
+pub const CustomMetricPredicateRule = struct {
+    selection: CustomMetricSelection,
+    predicate: custom_calculation.CustomMetricPredicate,
+
+    pub fn deinit(self: *CustomMetricPredicateRule, _: Allocator) void {
+        self.selection.deinit();
+        self.* = undefined;
+    }
+
+    pub fn description(self: *const CustomMetricPredicateRule, allocator: Allocator) Allocator.Error![]u8 {
+        const subjects = try self.selection.subjectDescription(allocator);
+        defer allocator.free(subjects);
+        return std.fmt.allocPrint(
+            allocator,
+            "{s} custom metric {s} ({s}) should satisfy its custom assertion",
+            .{ subjects, self.selection.name, self.selection.description_value },
+        );
+    }
+
+    pub fn check(self: *const CustomMetricPredicateRule, options: CheckOptions) anyerror!assertion.ViolationList {
+        var analysis = try analyzeCustomMetricSubjects(&self.selection, options);
+        defer analysis.deinit(options.allocator);
+        if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
+            return guarded;
+        }
+        return custom_calculation.gatherPredicateViolations(
+            options.allocator,
+            analysis.subjects.items,
+            self.selection.definition(),
+            self.predicate,
+        );
+    }
+};
+
+const CustomMetricSubjectAnalysis = struct {
+    structural_analysis: ?MetricAnalysis = null,
+    dependency_analysis: ?dependency_calculation.DependencyMetricSnapshot = null,
+    subjects: std.ArrayList(custom_calculation.CustomMetricInfo) = .empty,
+
+    fn deinit(self: *CustomMetricSubjectAnalysis, allocator: Allocator) void {
+        self.subjects.deinit(allocator);
+        if (self.dependency_analysis) |*analysis| analysis.deinit(allocator);
+        if (self.structural_analysis) |*analysis| analysis.deinit(allocator);
+        self.* = undefined;
+    }
+};
+
+fn analyzeCustomMetricSubjects(
+    selection: *const CustomMetricSelection,
+    options: CheckOptions,
+) anyerror!CustomMetricSubjectAnalysis {
+    if (selection.projected_target) |target| {
+        return analyzeProjectedCustomMetricSubjects(selection, target, options);
+    }
+    return analyzeStructuralCustomMetricSubjects(selection, options);
+}
+
+fn analyzeStructuralCustomMetricSubjects(
+    selection: *const CustomMetricSelection,
+    options: CheckOptions,
+) anyerror!CustomMetricSubjectAnalysis {
+    var structural_analysis = try selection.scope.analyze(options);
+    errdefer structural_analysis.deinit(options.allocator);
+    var dependency_analysis: ?dependency_calculation.DependencyMetricSnapshot = null;
+    errdefer if (dependency_analysis) |*analysis| analysis.deinit(options.allocator);
+    if (selection.scope.target_level == .file) {
+        dependency_analysis = try extractFileDependencyMetrics(&selection.scope, options);
+    }
+
+    var subjects: std.ArrayList(custom_calculation.CustomMetricInfo) = .empty;
+    errdefer subjects.deinit(options.allocator);
+    try subjects.ensureTotalCapacity(options.allocator, structural_analysis.subjects.items.len);
+    for (structural_analysis.subjects.items) |subject| {
+        const dependency = if (dependency_analysis) |*analysis|
+            if (analysis.find(subject.identifier)) |value| customDependencyFacts(value.*) else null
+        else
+            null;
+        subjects.appendAssumeCapacity(.{
+            .identifier = subject.identifier,
+            .name = subject.name,
+            .qualified_name = subject.qualified_name,
+            .file_path = subject.file_path,
+            .target_kind = subject.target_level.violationKind(),
+            .syntax_valid = subject.syntax_valid,
+            .structural = subject.metrics,
+            .dependency = dependency,
+            .source_file_count = 1,
+        });
+    }
+    return .{
+        .structural_analysis = structural_analysis,
+        .dependency_analysis = dependency_analysis,
+        .subjects = subjects,
+    };
+}
+
+fn analyzeProjectedCustomMetricSubjects(
+    selection: *const CustomMetricSelection,
+    target: ProjectedMetricTarget,
+    options: CheckOptions,
+) anyerror!CustomMetricSubjectAnalysis {
+    var diagnostics = common_error.ErrorContext.init(options.allocator);
+    defer diagnostics.deinit();
+    var graph = try extraction.extractProjectGraph(
+        options.allocator,
+        options.io,
+        selection.scope.owned_locator,
+        options.working_directory,
+        options.extraction,
+        options.clear_cache,
+        &diagnostics,
+    );
+    defer graph.deinit(options.allocator);
+    var projected_edges = try projection.projectEdges(options.allocator, &graph, target.mapper);
+    defer projected_edges.deinit(options.allocator);
+
+    var labels: std.ArrayList([]const u8) = .empty;
+    defer labels.deinit(options.allocator);
+    for (projected_edges.items()) |edge| {
+        if (!std.mem.eql(u8, edge.source_label, edge.target_label)) continue;
+        if (!projectedEdgeHasInternalEvidence(edge)) continue;
+        try labels.append(options.allocator, edge.source_label);
+    }
+    var dependency_analysis = try dependency_calculation.calculateDependencyMetrics(
+        options.allocator,
+        labels.items,
+        projected_edges.items(),
+    );
+    errdefer dependency_analysis.deinit(options.allocator);
+    var subjects: std.ArrayList(custom_calculation.CustomMetricInfo) = .empty;
+    errdefer subjects.deinit(options.allocator);
+    try subjects.ensureTotalCapacity(options.allocator, dependency_analysis.items().len);
+    for (dependency_analysis.items()) |dependency| {
+        subjects.appendAssumeCapacity(.{
+            .identifier = dependency.identifier,
+            .name = dependency.identifier,
+            .target_kind = target.level.targetKind(),
+            .dependency = customDependencyFacts(dependency),
+            .source_file_count = try projectedSourceFileCount(
+                options.allocator,
+                projected_edges.items(),
+                dependency.identifier,
+            ),
+        });
+    }
+    return .{ .dependency_analysis = dependency_analysis, .subjects = subjects };
+}
+
+fn customDependencyFacts(
+    dependency: dependency_calculation.DependencyMetricInfo,
+) custom_calculation.CustomDependencyFacts {
+    return .{
+        .afferent_coupling = dependency.afferent_coupling,
+        .efferent_coupling = dependency.efferent_coupling,
+        .instability = dependency.instability,
+        .coupling_factor = dependency.coupling_factor,
+    };
+}
+
+fn projectedEdgeHasInternalEvidence(edge: projection.ProjectedEdge) bool {
+    for (edge.evidence()) |evidence| if (!evidence.external) return true;
+    return false;
+}
+
+fn projectedSourceFileCount(
+    allocator: Allocator,
+    edges: []const projection.ProjectedEdge,
+    label: []const u8,
+) Allocator.Error!usize {
+    var sources = std.StringHashMap(void).init(allocator);
+    defer sources.deinit();
+    for (edges) |edge| {
+        if (!std.mem.eql(u8, edge.source_label, label) or
+            !std.mem.eql(u8, edge.target_label, label)) continue;
+        for (edge.evidence()) |evidence| {
+            if (evidence.external or !std.mem.eql(u8, evidence.source, evidence.target)) continue;
+            try sources.put(evidence.source, {});
+        }
+    }
+    return sources.count();
+}
+
+fn guardCustomMetricEmpty(
+    selection: *const CustomMetricSelection,
+    matched_count: usize,
+    options: CheckOptions,
+) anyerror!?assertion.ViolationList {
+    var evidence = try selection.scope.scopePatterns(options.allocator);
+    defer evidence.deinit(options.allocator);
+    return assertion.guardEmptyTest(
+        options.allocator,
+        matched_count,
+        options.allow_empty_tests,
+        "metrics.custom",
+        evidence.items(),
+        .should,
+    );
+}
+
+fn hasText(value: []const u8) bool {
+    return std.mem.trim(u8, value, " \t\r\n\x0b\x0c").len != 0;
+}
+
 fn writeMetricValue(writer: *std.Io.Writer, value: assertion.MetricValue) std.Io.Writer.Error!void {
     switch (value) {
         .signed => |number| try writer.print("{d}", .{number}),
@@ -1368,6 +1844,342 @@ test "dependency metric builder chains release every partial allocation" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         exerciseDependencyBuilderAllocationFailures,
+        .{},
+    );
+}
+
+fn dependencyWeightedLines(_: Allocator, info: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+    if (info.target_kind != .file or info.file_path == null or info.structural == null or info.dependency == null) {
+        return error.IncompleteFileMetricInfo;
+    }
+    return .{ .unsigned = @intCast(
+        info.structural.?.non_blank_lines + info.dependency.?.efferent_coupling,
+    ) };
+}
+
+fn declarationOrContainerRatio(
+    _: Allocator,
+    info: custom_calculation.CustomMetricInfo,
+) !assertion.MetricValue {
+    if (info.structural == null or info.file_path == null) return error.IncompleteStructuralMetricInfo;
+    return switch (info.target_kind) {
+        .declaration => .{ .signed = @intCast(info.structural.?.tokens) },
+        .container => .{ .floating = @as(f64, @floatFromInt(info.structural.?.functions)) /
+            @as(f64, @floatFromInt(@max(info.structural.?.fields, 1))) },
+        else => error.UnexpectedStructuralTarget,
+    };
+}
+
+fn metricFixtureGroup(path: []const u8) []const u8 {
+    if (std.mem.eql(u8, path, "src/a.zig")) return "api";
+    if (std.mem.eql(u8, path, "src/b.zig") or std.mem.eql(u8, path, "src/c.zig")) return "domain";
+    if (std.mem.eql(u8, path, "src/isolated.zig")) return "isolated";
+    if (std.mem.eql(u8, path, "build.zig")) return "build";
+    return "external";
+}
+
+fn projectMetricFixture(edge: *const extraction.Edge) ?projection.MappedEdge {
+    return .{
+        .source_label = metricFixtureGroup(edge.source),
+        .target_label = if (edge.external) "external" else metricFixtureGroup(edge.target),
+    };
+}
+
+fn projectedSourceFiles(_: Allocator, info: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+    if ((info.target_kind != .module and info.target_kind != .slice) or
+        info.file_path != null or info.structural != null or info.dependency == null)
+    {
+        return error.InvalidProjectedMetricInfo;
+    }
+    return .{ .unsigned = @intCast(info.source_file_count) };
+}
+
+fn projectedInstability(_: Allocator, info: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+    return .{ .floating = info.dependency.?.instability };
+}
+
+fn findCustomMeasurement(
+    measurements: *const custom_calculation.CustomMetricMeasurements,
+    identifier: []const u8,
+) ?*const custom_calculation.CustomMetricMeasurement {
+    for (measurements.items()) |*measurement| {
+        if (std.mem.eql(u8, measurement.target_identifier, identifier)) return measurement;
+    }
+    return null;
+}
+
+test "custom file metrics receive structural and dependency-safe views" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var metric = try selected.customMetric(
+        "dependency_weighted_lines",
+        "non-blank lines plus distinct outgoing file dependencies",
+        custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+    );
+    defer metric.deinit();
+    var measurements = try metric.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer measurements.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("dependency_weighted_lines", metric.metricName());
+    try std.testing.expectEqual(assertion.MetricTargetKind.file, metric.targetKind());
+    try std.testing.expectEqual(@as(usize, 1), measurements.items().len);
+    try std.testing.expectEqualStrings("src/a.zig", measurements.items()[0].target_identifier);
+    try std.testing.expectEqual(@as(u64, 8), measurements.items()[0].value.unsigned);
+}
+
+test "custom declaration and container metrics preserve signed and floating values" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var declaration_scope = try root.forDeclarationsMatching(&.{.{ .glob = "choose" }});
+    defer declaration_scope.deinit();
+    var declaration_metric = try declaration_scope.customMetric(
+        "token_score",
+        "signed declaration token score",
+        custom_calculation.CustomMetricCalculation.fromStateless(declarationOrContainerRatio),
+    );
+    defer declaration_metric.deinit();
+    var declaration_values = try declaration_metric.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer declaration_values.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.MetricTargetKind.declaration, declaration_values.items()[0].target_kind);
+    try std.testing.expect(declaration_values.items()[0].value.signed > 0);
+
+    var container_scope = try root.forContainersMatching(&.{.{ .glob = "Worker" }});
+    defer container_scope.deinit();
+    var container_metric = try container_scope.customMetric(
+        "function_field_ratio",
+        "functions divided by fields",
+        custom_calculation.CustomMetricCalculation.fromStateless(declarationOrContainerRatio),
+    );
+    defer container_metric.deinit();
+    var container_values = try container_metric.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer container_values.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.MetricTargetKind.container, container_values.items()[0].target_kind);
+    try std.testing.expectEqual(@as(f64, 1.0), container_values.items()[0].value.floating);
+}
+
+test "custom projected module and slice metrics use caller-defined labels" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    const mapper = projection.MapFunction.fromStateless(projectMetricFixture);
+    var modules = try root.customMetricForProjection(
+        .module,
+        mapper,
+        "source_files",
+        "distinct Zig source files contributing to the projected label",
+        custom_calculation.CustomMetricCalculation.fromStateless(projectedSourceFiles),
+    );
+    defer modules.deinit();
+    var module_values = try modules.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer module_values.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 4), module_values.items().len);
+    try std.testing.expectEqual(assertion.MetricTargetKind.module, modules.targetKind());
+    try std.testing.expectEqual(@as(u64, 2), findCustomMeasurement(&module_values, "domain").?.value.unsigned);
+
+    var slices = try root.customMetricForProjection(
+        .slice,
+        mapper,
+        "instability",
+        "project-specific slice instability",
+        custom_calculation.CustomMetricCalculation.fromStateless(projectedInstability),
+    );
+    defer slices.deinit();
+    var slice_values = try slices.measure(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer slice_values.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.MetricTargetKind.slice, slices.targetKind());
+    try std.testing.expectEqual(@as(f64, 1.0), findCustomMeasurement(&slice_values, "api").?.value.floating);
+    try std.testing.expectEqual(@as(f64, 0.0), findCustomMeasurement(&slice_values, "domain").?.value.floating);
+}
+
+const CustomPredicateContext = struct {
+    calls: *usize,
+    expected_kind: assertion.MetricTargetKind,
+
+    fn satisfies(
+        self: *const CustomPredicateContext,
+        _: Allocator,
+        value: assertion.MetricValue,
+        info: custom_calculation.CustomMetricInfo,
+    ) !bool {
+        self.calls.* += 1;
+        if (info.target_kind != self.expected_kind) return error.UnexpectedPredicateContext;
+        return value.unsigned < 8;
+    }
+};
+
+fn failCustomCalculation(_: Allocator, _: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+    return error.CustomCalculationFailed;
+}
+
+fn failCustomPredicate(_: Allocator, _: assertion.MetricValue, _: custom_calculation.CustomMetricInfo) !bool {
+    return error.CustomPredicateFailed;
+}
+
+test "custom thresholds and predicates retain descriptions and callback context" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var metric = try selected.customMetric(
+        "dependency_weighted_lines",
+        "non-blank lines plus distinct outgoing file dependencies",
+        custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+    );
+    defer metric.deinit();
+    var threshold_rule = try metric.shouldBeBelow(.{ .unsigned = 8 });
+    defer threshold_rule.deinit(std.testing.allocator);
+    var threshold_result = try threshold_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer threshold_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.custom_metric, threshold_result.items()[0].kind());
+    try std.testing.expectEqualStrings(
+        "non-blank lines plus distinct outgoing file dependencies",
+        threshold_result.items()[0].custom_metric.metric_description,
+    );
+
+    var calls: usize = 0;
+    const predicate_context = CustomPredicateContext{ .calls = &calls, .expected_kind = .file };
+    var predicate_rule = try metric.shouldSatisfy(custom_calculation.CustomMetricPredicate.fromContext(
+        CustomPredicateContext,
+        &predicate_context,
+        CustomPredicateContext.satisfies,
+    ));
+    defer predicate_rule.deinit(std.testing.allocator);
+    var predicate_result = try predicate_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer predicate_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), calls);
+    try std.testing.expectEqual(assertion.Violation.Kind.custom_metric, predicate_result.items()[0].kind());
+    try std.testing.expectEqual(assertion.CustomMetricExpectation.predicate, std.meta.activeTag(
+        predicate_result.items()[0].custom_metric.expectation,
+    ));
+}
+
+test "custom terminals repeat safely erase as Checkable and guard before callbacks" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    var metric = try selected.customMetric(
+        "dependency_weighted_lines",
+        "non-blank lines plus distinct outgoing file dependencies",
+        custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+    );
+    defer metric.deinit();
+    var terminal = try metric.shouldBeBelowOrEqual(.{ .unsigned = 8 });
+    var erased = try fluentapi.Checkable.fromMove(std.testing.allocator, &terminal);
+    defer erased.deinit();
+    const sentence = try erased.description(std.testing.allocator);
+    defer std.testing.allocator.free(sentence);
+    try std.testing.expectEqualStrings(
+        "Zig project files, in file \"src/a.zig\" custom metric dependency_weighted_lines " ++
+            "(non-blank lines plus distinct outgoing file dependencies) should be below or equal to 8",
+        sentence,
+    );
+    var first = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer first.deinit(std.testing.allocator);
+    var second = try erased.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer second.deinit(std.testing.allocator);
+    try std.testing.expect(first.passes());
+    try std.testing.expect(second.passes());
+
+    var missing = try root.withName(&.{.{ .glob = "missing.zig" }});
+    defer missing.deinit();
+    var never_called = try missing.customMetric(
+        "never_called",
+        "empty scopes guard before custom calculation",
+        custom_calculation.CustomMetricCalculation.fromStateless(failCustomCalculation),
+    );
+    defer never_called.deinit();
+    var empty_terminal = try never_called.shouldBe(.{ .unsigned = 0 });
+    defer empty_terminal.deinit(std.testing.allocator);
+    var empty_result = try empty_terminal.check(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer empty_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(assertion.Violation.Kind.empty_test, empty_result.items()[0].kind());
+}
+
+test "custom callback errors and builder validation remain explicit" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-dependency" });
+    defer root.deinit();
+    try std.testing.expectError(
+        error.InvalidMetricName,
+        root.customMetric(
+            " ",
+            "described metric",
+            custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+        ),
+    );
+    try std.testing.expectError(
+        error.InvalidMetricDescription,
+        root.customMetric(
+            "metric",
+            "\t",
+            custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+        ),
+    );
+    var selected = try root.inFile(&.{"src/a.zig"});
+    defer selected.deinit();
+    try std.testing.expectError(
+        error.UnsupportedProjectedSelectors,
+        selected.customMetricForProjection(
+            .module,
+            projection.MapFunction.fromStateless(projectMetricFixture),
+            "source_files",
+            "source files per module",
+            custom_calculation.CustomMetricCalculation.fromStateless(projectedSourceFiles),
+        ),
+    );
+
+    var failing = try selected.customMetric(
+        "failing",
+        "calculation error propagation",
+        custom_calculation.CustomMetricCalculation.fromStateless(failCustomCalculation),
+    );
+    defer failing.deinit();
+    try std.testing.expectError(
+        error.CustomCalculationFailed,
+        failing.measure(CheckOptions.init(std.testing.allocator, std.testing.io)),
+    );
+
+    var valid = try selected.customMetric(
+        "valid",
+        "predicate error propagation",
+        custom_calculation.CustomMetricCalculation.fromStateless(dependencyWeightedLines),
+    );
+    defer valid.deinit();
+    try std.testing.expectError(error.InvalidThreshold, valid.shouldBeBelow(.{ .floating = std.math.inf(f64) }));
+    var predicate_rule = try valid.shouldSatisfy(
+        custom_calculation.CustomMetricPredicate.fromStateless(failCustomPredicate),
+    );
+    defer predicate_rule.deinit(std.testing.allocator);
+    try std.testing.expectError(
+        error.CustomPredicateFailed,
+        predicate_rule.check(CheckOptions.init(std.testing.allocator, std.testing.io)),
+    );
+}
+
+fn exerciseCustomMetricBuilderAllocationFailures(allocator: Allocator) !void {
+    var root = try metrics(allocator, .{ .locator = "fixture" });
+    defer root.deinit();
+    var containers = try root.forContainersMatching(&.{.{ .glob = "*Service" }});
+    defer containers.deinit();
+    var metric = try containers.customMetric(
+        "risk",
+        "project-specific structural risk",
+        custom_calculation.CustomMetricCalculation.fromStateless(declarationOrContainerRatio),
+    );
+    defer metric.deinit();
+    var cloned = try metric.clone();
+    defer cloned.deinit();
+    var terminal = try metric.shouldBeAboveOrEqual(.{ .floating = 0.5 });
+    defer terminal.deinit(allocator);
+    const sentence = try terminal.description(allocator);
+    defer allocator.free(sentence);
+}
+
+test "custom metric builder chains release every partial allocation" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        exerciseCustomMetricBuilderAllocationFailures,
         .{},
     );
 }

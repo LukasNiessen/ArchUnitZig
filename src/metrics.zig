@@ -26,6 +26,7 @@ pub const measureCustomMetric = @import("metrics/calculation/custom.zig").measur
 pub const MetricBuilderError = @import("metrics/fluentapi/metrics.zig").BuilderError;
 pub const MetricProjectOptions = @import("metrics/fluentapi/metrics.zig").ProjectOptions;
 pub const MetricTargetLevel = @import("metrics/fluentapi/metrics.zig").TargetLevel;
+pub const ProjectedMetricTargetLevel = @import("metrics/fluentapi/metrics.zig").ProjectedTargetLevel;
 pub const MetricsScope = @import("metrics/fluentapi/metrics.zig").MetricsScope;
 pub const MetricAnalysis = @import("metrics/fluentapi/metrics.zig").MetricAnalysis;
 pub const MetricSubject = @import("metrics/fluentapi/metrics.zig").MetricSubject;
@@ -43,6 +44,9 @@ pub const DependencyMeasurements = @import("metrics/fluentapi/metrics.zig").Depe
 pub const DependencyCountSelection = @import("metrics/fluentapi/metrics.zig").DependencyCountSelection;
 pub const DependencyRatioSelection = @import("metrics/fluentapi/metrics.zig").DependencyRatioSelection;
 pub const DependencyThresholdRule = @import("metrics/fluentapi/metrics.zig").DependencyThresholdRule;
+pub const CustomMetricSelection = @import("metrics/fluentapi/metrics.zig").CustomMetricSelection;
+pub const CustomMetricThresholdRule = @import("metrics/fluentapi/metrics.zig").CustomMetricThresholdRule;
+pub const CustomMetricPredicateRule = @import("metrics/fluentapi/metrics.zig").CustomMetricPredicateRule;
 pub const metrics = @import("metrics/fluentapi/metrics.zig").metrics;
 
 test {
