@@ -57,6 +57,12 @@ pub const MetricsReportData = @import("metrics/reporting.zig").MetricsReportData
 pub const MetricsReportEntry = @import("metrics/reporting.zig").MetricsReportEntry;
 pub const MetricsReportSection = @import("metrics/reporting.zig").MetricsReportSection;
 pub const MetricsReportSectionKind = @import("metrics/reporting.zig").MetricsReportSectionKind;
+pub const MetricsExportOptions = @import("metrics/reporting.zig").MetricsExportOptions;
+pub const MetricsRenderError = @import("metrics/reporting.zig").MetricsRenderError;
+pub const metricsToHtml = @import("metrics/reporting.zig").metricsToHtml;
+pub const MetricsExportError = @import("metrics/reporting.zig").MetricsExportError;
+pub const exportMetricsAsHtml = @import("metrics/reporting.zig").exportMetricsAsHtml;
+pub const resolveMetricsHtmlPath = @import("metrics/reporting.zig").resolveMetricsHtmlPath;
 
 test {
     _ = @import("metrics/assertion/threshold.zig");
