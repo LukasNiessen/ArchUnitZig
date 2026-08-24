@@ -8,7 +8,6 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 pub const file_name = ".archignore";
-const max_file_size = 1024 * 1024;
 
 /// One owned snapshot of the root policy. The exact path, presence, and content fingerprint are
 /// retained separately from the effective patterns so cache identity can conservatively track
@@ -52,7 +51,7 @@ pub fn load(
         io,
         joined_path,
         allocator,
-        .limited(max_file_size),
+        .limited(std.math.maxInt(usize)),
         .of(u8),
         0,
     ) catch |failure| switch (failure) {

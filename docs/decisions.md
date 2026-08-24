@@ -1258,10 +1258,11 @@ root; and a trailing separator selects a directory for traversal pruning. `*`, `
 character classes retain the same case-sensitive behavior as programmatic extraction exclusions.
 This is deliberately not advertised as gitignore compatibility.
 
-ASCII surrounding whitespace is trimmed. Empty lines and lines whose first non-whitespace byte is
-`#` are ignored. `#` elsewhere is literal. Negation is not supported because re-inclusion would
-conflict with selective traversal and the promise that built-in cache, VCS, output, documentation,
-and dependency boundaries are never entered. A first non-whitespace `!`, an empty rooted pattern,
+Surrounding spaces, tabs, and carriage returns are trimmed around each physical line. Empty lines
+and lines whose first remaining byte is `#` are ignored. `#` elsewhere is literal. Negation is not
+supported because re-inclusion would conflict with selective traversal and the promise that built-in
+cache, VCS, output, documentation, and dependency boundaries are never entered. A first
+non-whitespace `!`, an empty rooted pattern,
 `.` or `..` path segments, NUL bytes, and invalid ArchUnit globs are user-facing `InvalidPattern`
 errors with a `project.parse_archignore` diagnostic. Failing closed avoids accepting policy text
 with semantics borrowed accidentally from another ignore language.
