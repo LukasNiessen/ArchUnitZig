@@ -1146,3 +1146,37 @@ Consequence: package wiring, public examples, and failure prose drift break `zig
 remain usable without making network access a test prerequisite; unsupported automatic module
 discovery, class metrics, and sibling-only slice vocabulary stay visibly absent; and the README can
 serve as a verified first contact rather than an aspirational feature list.
+
+### D048 — Pages are built from owned fragments and compiled examples
+
+The documentation site is a repository-owned static artifact, not an application with a client-side
+framework. Eleven authored HTML fragments cover getting started, grammar and matching, extraction
+and module resolution, each policy/report domain, testing, internals, and limitations. One JSON
+manifest supplies information architecture and metadata; one local stylesheet supplies responsive
+layout and accessible focus behavior. The builder adds the shared semantic shell, navigation, and
+footer without remote fonts, scripts, styles, or images. Core reading therefore works from the
+downloaded Pages artifact with JavaScript disabled and without any third-party runtime service.
+
+Code examples are not duplicated into a second unverified source tree. Fragment placeholders name
+the standalone README consumer and six canonical public-facade examples already compiled by the
+top-level suite. The standard-library Python builder reads and HTML-escapes those exact files. Zig's
+own documentation emitter produces the API reference from the same public module used by external
+tests. Zig assigns the builder a cache-owned output directory, the builder writes only when its own
+marker is present, and the build graph installs the validated result under `zig-out/docs-site`.
+This avoids treating an arbitrary caller path as disposable output.
+
+The standard-library checker requires the full page set, API entry point, local stylesheet, Pages
+markers, robots file, and sitemap. It resolves every authored internal link and fragment, rejects
+unresolved templates and remote runtime assets, and checks language, title, description, viewport,
+heading, landmark, labeled navigation, skip-link, focus, overflow, reduced-motion, and responsive
+contracts. Both `zig build docs` and `zig build test` build and validate the site after the compiled
+consumer examples.
+
+The Pages workflow gives every push and pull request an ordinary artifact-only build job. Deployment
+is a separate job guarded to a main-branch push in the canonical repository, where it receives the
+minimal Pages and identity permissions. Forks and pull requests therefore validate exactly the
+deployable files without requiring Pages settings, environments, secrets, or write permissions.
+
+Consequence: guide prose, public Zig examples, generated API documentation, site navigation, and
+deployment packaging fail one local/CI contract when they drift; the site stays maintainable and
+offline-readable; and a fork can prove documentation quality without being able to publish it.
