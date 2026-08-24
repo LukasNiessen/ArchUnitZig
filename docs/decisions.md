@@ -786,3 +786,50 @@ syntax has no escaping convention.
 Consequence: checked-in diagrams detect architecture drift in both directions, generated diagrams
 are reproducible contracts rather than illustrations with different semantics, and the library does
 not overclaim compatibility with unrelated PlantUML constructs.
+
+### D038 — Structural metrics use declaration-bound container identities
+
+Zig metrics do not translate TypeScript's class model. The owned extraction model contains files
+and named declarations. A file's declaration counts describe immediate root members. A named
+container declaration's counts describe its immediate members. Every declaration also carries
+lexical source-line, non-blank-line, token, `@import`, anonymous-container, and recursively nested
+block-statement facts for its own source span. Fields follow Zig AST container-field semantics, so
+struct fields, union fields, and enum tags belong to the same honest category. Functions with
+`comptime` or `anytype` parameters remain functions; generic syntax does not create a second kind.
+
+A struct, union, enum, opaque type, or error set becomes a selectable container only when its AST
+node is the direct initializer of a named `const` or `var`. Nested declarations receive qualified
+names such as `Outer.Inner` and stable identifiers such as `src/model.zig:Outer.Inner`. Selectors
+match both the simple and qualified declaration name. An inline field type, returned container, or
+container behind an `if`/`switch`/`comptime` expression has no declaration identity. Such syntax is
+counted under `anonymous_containers` but never receives a volatile line/column pseudo-name. Local
+declarations behind control flow contribute statements and lexical facts, not fictitious container
+membership.
+
+Import count means lexical `@import` builtin occurrences. Statement count sums the direct statement
+entries of every block inside the subject span, so nesting is visible without counting expression
+AST nodes as statements. Token count excludes EOF. Source-line count treats a terminal newline as a
+terminator rather than an additional synthetic empty line. Non-blank lines trim ASCII source
+whitespace. On malformed input, strict mode returns the established parser failure; permissive mode
+keeps only physical and non-blank line counts, marks syntax invalid, and invents no AST facts.
+
+The fluent scope is lazy and owned. It defaults to file subjects and can switch explicitly to all
+named declarations or only declaration-bound containers. Path, filename, folder, exact-file, simple
+name, and qualified-name selection reuse shared glob/regex behavior. Measurements are owned;
+programmatic analyses own their extracted project and expose borrowed subject views; summaries add
+the complete selected structural records. Empty selections use the shared guard.
+
+Metric values are tagged signed integers, unsigned integers, or floating point. Structural counts
+remain unsigned and never lose precision through `f64`. The five numeric threshold verbs use one
+comparison function and one structured metric violation. Mixed integer/float comparison is rejected
+until issue #37 defines its deliberate policy and adds the sixth predicate verb, `shouldSatisfy`,
+for all built-in and custom families.
+
+Class counts, interface counts, method aliases, and class-level LCOM are deliberately absent.
+Dependency coupling remains issue #35, custom callbacks issue #36, the complete six-verb contract
+issue #37, and HTML reporting issue #38.
+
+Consequence: count rules describe Zig syntax at stable reviewable subject boundaries, anonymous and
+conditional types remain observable without brittle identities, malformed editor buffers do not
+manufacture facts, and later metric families share numeric evidence without inheriting a class
+ontology or floating-point precision loss.

@@ -66,6 +66,39 @@ defer diagram_rule.deinit(std.testing.allocator);
 supported subset and strict missing/extra relationship behavior are recorded in
 [D037](docs/decisions.md#d037--plantuml-validation-is-a-strict-diagnosable-component-subset).
 
+## Structural metrics example
+
+Zig metrics describe files and declarations instead of pretending containers are classes. This
+rule limits immediate function declarations in every declaration-bound container under `src`:
+
+```zig
+var project = try archunit.metrics(std.testing.allocator, .{});
+defer project.deinit();
+var source = try project.inPath(&.{.{ .glob = "src/**/*.zig" }});
+defer source.deinit();
+var containers = try source.forContainersMatching(&.{.{ .glob = "*" }});
+defer containers.deinit();
+var counts = try containers.count();
+defer counts.deinit();
+var functions = try counts.functions();
+defer functions.deinit();
+var rule = try functions.shouldBeBelowOrEqual(12);
+defer rule.deinit(std.testing.allocator);
+
+try archunit.expectPasses(
+    &rule,
+    archunit.AssertionOptions.init(
+        archunit.CheckOptions.init(std.testing.allocator, std.testing.io),
+    ),
+);
+```
+
+The same count builder exposes declarations, tests, constants, variables, fields, each named Zig
+container kind, anonymous container syntax, imports, statements, tokens, source lines, and
+non-blank lines. File, declaration, and container measurements can also be consumed directly with
+`measure`, `summary`, and `analyze`. The precise AST and identity contract is recorded in
+[D038](docs/decisions.md#d038--structural-metrics-use-declaration-bound-container-identities).
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.
