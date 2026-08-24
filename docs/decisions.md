@@ -1173,10 +1173,12 @@ contracts. `zig build docs` builds and validates the site after the compiled con
 ordinary `zig build test` gate continues to compile those canonical examples without requiring
 Python, keeping the core Zig test prerequisite separate from the documentation toolchain.
 
-The Pages workflow gives every push and pull request an ordinary artifact-only build job. Deployment
-is a separate job guarded to a main-branch push in the canonical repository, where it receives the
-minimal Pages and identity permissions. Forks and pull requests therefore validate exactly the
-deployable files without requiring Pages settings, environments, secrets, or write permissions.
+The Pages workflow gives every main-branch push, pull request, and manual run an ordinary
+artifact-only build job. Deployment is a separate job guarded to a main-branch push in the canonical
+repository, where it receives the minimal Pages and identity permissions. Forks and pull requests
+therefore validate exactly the deployable files without requiring Pages settings, environments,
+secrets, or write permissions. Feature branches with a pull request produce one build rather than a
+duplicate branch-push and pull-request pair.
 
 Consequence: guide prose, public Zig examples, generated API documentation, site navigation, and
 deployment packaging fail one local/CI contract when they drift; the site stays maintainable and
