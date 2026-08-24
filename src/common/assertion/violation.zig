@@ -3,6 +3,7 @@ const std = @import("std");
 const empty_test = @import("empty_test_violation.zig");
 const cycle_violation = @import("cycle_violation.zig");
 const custom_file_violation = @import("custom_file_violation.zig");
+const custom_metric_violation = @import("custom_metric_violation.zig");
 const file_dependency_violation = @import("file_dependency_violation.zig");
 const external_dependency_violation = @import("external_module_dependency_violation.zig");
 const layer_dependency_violation = @import("layer_dependency_violation.zig");
@@ -14,6 +15,7 @@ const Allocator = std.mem.Allocator;
 pub const EmptyTestViolation = empty_test.EmptyTestViolation;
 pub const CycleViolation = cycle_violation.CycleViolation;
 pub const CustomFileViolation = custom_file_violation.CustomFileViolation;
+pub const CustomMetricViolation = custom_metric_violation.CustomMetricViolation;
 pub const FileDependencyViolation = file_dependency_violation.FileDependencyViolation;
 pub const ExternalModuleDependencyViolation = external_dependency_violation.ExternalModuleDependencyViolation;
 pub const LayerDependencyViolation = layer_dependency_violation.LayerDependencyViolation;
@@ -26,6 +28,7 @@ pub const SliceDependencyViolation = slice_dependency_violation.SliceDependencyV
 pub const Violation = union(enum) {
     cycle: CycleViolation,
     custom_file: CustomFileViolation,
+    custom_metric: CustomMetricViolation,
     empty_test: EmptyTestViolation,
     external_module_dependency: ExternalModuleDependencyViolation,
     file_dependency: FileDependencyViolation,
@@ -35,7 +38,7 @@ pub const Violation = union(enum) {
     slice_dependency: SliceDependencyViolation,
 
     pub const Kind = std.meta.Tag(Violation);
-    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || slice_dependency_violation.InitError || custom_file_violation.InitError || metric_violation.InitError;
+    pub const CloneError = empty_test.InitError || cycle_violation.InitError || file_dependency_violation.InitError || external_dependency_violation.InitError || layer_dependency_violation.InitError || slice_dependency_violation.InitError || custom_file_violation.InitError || custom_metric_violation.InitError || metric_violation.InitError;
 
     pub fn fromCycleMove(payload: *CycleViolation) Violation {
         const result = Violation{ .cycle = payload.* };
@@ -45,6 +48,12 @@ pub const Violation = union(enum) {
 
     pub fn fromCustomFileMove(payload: *CustomFileViolation) Violation {
         const result = Violation{ .custom_file = payload.* };
+        payload.* = undefined;
+        return result;
+    }
+
+    pub fn fromCustomMetricMove(payload: *CustomMetricViolation) Violation {
+        const result = Violation{ .custom_metric = payload.* };
         payload.* = undefined;
         return result;
     }
@@ -99,6 +108,7 @@ pub const Violation = union(enum) {
         return switch (self) {
             .cycle => |value| .{ .cycle = try value.clone(allocator) },
             .custom_file => |value| .{ .custom_file = try value.clone(allocator) },
+            .custom_metric => |value| .{ .custom_metric = try value.clone(allocator) },
             .empty_test => |value| .{ .empty_test = try value.clone(allocator) },
             .external_module_dependency => |value| .{ .external_module_dependency = try value.clone(allocator) },
             .file_dependency => |value| .{ .file_dependency = try value.clone(allocator) },
@@ -113,6 +123,7 @@ pub const Violation = union(enum) {
         switch (self.*) {
             .cycle => |*value| value.deinit(allocator),
             .custom_file => |*value| value.deinit(allocator),
+            .custom_metric => |*value| value.deinit(allocator),
             .empty_test => |*value| value.deinit(allocator),
             .external_module_dependency => |*value| value.deinit(allocator),
             .file_dependency => |*value| value.deinit(allocator),
@@ -129,6 +140,7 @@ pub const Violation = union(enum) {
         return switch (self) {
             .cycle => |left| left.eql(other.cycle),
             .custom_file => |left| left.eql(other.custom_file),
+            .custom_metric => |left| left.eql(other.custom_metric),
             .empty_test => |left| left.eql(other.empty_test),
             .external_module_dependency => |left| left.eql(other.external_module_dependency),
             .file_dependency => |left| left.eql(other.file_dependency),
@@ -144,6 +156,7 @@ fn formatterDispatchBoundary(violation: Violation) []const u8 {
     return switch (violation) {
         .cycle => "format-cycle-in-testing-layer",
         .custom_file => "format-custom-file-in-testing-layer",
+        .custom_metric => "format-custom-metric-in-testing-layer",
         .empty_test => "format-empty-selection-in-testing-layer",
         .external_module_dependency => "format-external-module-dependency-in-testing-layer",
         .file_dependency => "format-file-dependency-in-testing-layer",
