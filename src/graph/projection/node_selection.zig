@@ -12,7 +12,10 @@ pub const Graph = extraction.Graph;
 pub const GraphQueryOptions = query_options.GraphQueryOptions;
 pub const SelectionError = Allocator.Error ||
     @import("../../common/matching/pattern.zig").CompileError ||
-    regex_module.Regex.MatchError || error{InvalidExclusionTarget};
+    regex_module.Regex.MatchError || error{
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
+};
 
 /// Sorted node labels borrowed from the source graph; only the outer slice is owned.
 pub const NodeSelection = struct {
@@ -33,6 +36,15 @@ pub fn selectNodes(
     graph: *const Graph,
     options: GraphQueryOptions,
 ) SelectionError!NodeSelection {
+    if (options.focus == null and options.focus_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
+    if (options.reachable_from == null and options.reachable_from_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
+    if (options.dependents_of == null and options.dependents_of_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
     const universe = try collectUniverse(allocator, graph, options.include_external_dependencies);
     errdefer allocator.free(universe);
     const has_query = options.focus != null or
@@ -364,6 +376,9 @@ test "query exclusions filter seeds with mixed targets before traversal" {
     try std.testing.expectError(error.InvalidExclusionTarget, selectNodes(std.testing.allocator, &graph, .{
         .focus = .{ .pattern = .{ .glob = "src/**" }, .depth = 0 },
         .focus_exclusions = &invalid,
+    }));
+    try std.testing.expectError(error.ExclusionWithoutSelector, selectNodes(std.testing.allocator, &graph, .{
+        .reachable_from_exclusions = &exclusions,
     }));
 }
 

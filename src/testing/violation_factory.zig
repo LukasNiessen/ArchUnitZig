@@ -735,6 +735,47 @@ test "empty and custom file formatters produce stable golden details" {
     );
 }
 
+test "empty test formatter preserves exclusion evidence in selector order" {
+    var positive = try assertion.ScopePattern.init(
+        std.testing.allocator,
+        0,
+        .{ .glob = "src/**" },
+        .path,
+        .exact,
+    );
+    defer positive.deinit(std.testing.allocator);
+    var generated = try assertion.ScopePattern.initExclusion(
+        std.testing.allocator,
+        0,
+        .{ .regex = "(^|/)generated/" },
+        .path_without_filename,
+        .exact,
+    );
+    defer generated.deinit(std.testing.allocator);
+    var payload = try assertion.EmptyTestViolation.init(
+        std.testing.allocator,
+        "files.have_no_cycles",
+        &.{ positive, generated },
+        false,
+    );
+    var violation = assertion.Violation.fromEmptyTestMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "project files in path src/**, except folder regex (^|/)generated/, should have no cycles",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        "Rule: project files in path src/**, except folder regex (^|/)generated/, should have no cycles\n" ++
+            "Rule id: files.have_no_cycles\n" ++
+            "Reason: no files matched the rule scope\n" ++
+            "Selectors: path glob \"src/**\" (exact) EXCEPT folder regex \"(^|/)generated/\" (exact)",
+        formatted.details,
+    );
+}
+
 test "file and external dependencies include deterministic locations kinds and classification" {
     const location = extraction.SourceLocation{ .byte_offset = 12, .line = 2, .column = 5 };
     var internal_edge = try testProjectedEdge(
