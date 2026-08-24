@@ -1197,7 +1197,8 @@ manifest, verification, and extraction boundary without network access.
 All external GitHub Actions references use immutable commit SHAs with the reviewed stable release tag
 beside them. The workflow grants only `contents: read` globally. Pages write and OIDC permissions
 exist only on the canonical main-push deploy job, which depends on every compatibility and quality
-gate. Fork pull requests can build and upload the ordinary documentation artifact but cannot deploy.
+gate. That guarded job may enable the GitHub Actions Pages source on its first run; fork pull requests
+can build and upload the ordinary documentation artifact but cannot configure or deploy Pages.
 No dependency or build cache is configured; a future cache must include the Zig version plus relevant
 ZON hash or lock inputs in its key.
 

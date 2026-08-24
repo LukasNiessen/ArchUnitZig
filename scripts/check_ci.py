@@ -43,6 +43,7 @@ def main() -> None:
         "zig build docs -Doptimize=ReleaseSafe",
         "pages: write",
         "id-token: write",
+        "enablement: true",
         "needs:",
         "- compatibility",
         "- quality",

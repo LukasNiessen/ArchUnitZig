@@ -25,8 +25,9 @@ on Linux, Windows, and macOS before deployment.
 
 Deployment runs only for a push to `main` in `LukasNiessen/ArchUnitZig`. The deploy job downloads the
 already-validated ordinary artifact, configures Pages, packages the Pages artifact, and deploys it
-with job-scoped `pages: write` and `id-token: write` permissions. Configure the repository's Pages
-source as **GitHub Actions** before the first upstream deployment.
+with job-scoped `pages: write` and `id-token: write` permissions. On its first canonical run,
+`actions/configure-pages` enables the repository's **GitHub Actions** Pages source; forks and pull
+requests never reach that step.
 
 ## Editing
 
