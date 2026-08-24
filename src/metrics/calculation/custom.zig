@@ -435,6 +435,48 @@ test "custom thresholds reuse shared comparisons and described violations" {
     try std.testing.expectEqual(@as(u64, 3), violation.expectation.threshold.threshold.unsigned);
 }
 
+test "custom callbacks integrate every threshold comparison in pass and fail directions" {
+    const definition = CustomMetricDefinition{
+        .name = "risk",
+        .description = "project-specific risk score",
+        .calculation = CustomMetricCalculation.fromStateless(structuralOrInstability),
+    };
+    const Case = struct {
+        comparison: MetricComparison,
+        threshold: MetricValue,
+        should_pass: bool,
+    };
+    const cases = [_]Case{
+        .{ .comparison = .below, .threshold = .{ .unsigned = 4 }, .should_pass = true },
+        .{ .comparison = .below, .threshold = .{ .unsigned = 3 }, .should_pass = false },
+        .{ .comparison = .above, .threshold = .{ .unsigned = 2 }, .should_pass = true },
+        .{ .comparison = .above, .threshold = .{ .unsigned = 3 }, .should_pass = false },
+        .{ .comparison = .equal, .threshold = .{ .unsigned = 3 }, .should_pass = true },
+        .{ .comparison = .equal, .threshold = .{ .unsigned = 2 }, .should_pass = false },
+        .{ .comparison = .below_or_equal, .threshold = .{ .unsigned = 3 }, .should_pass = true },
+        .{ .comparison = .below_or_equal, .threshold = .{ .unsigned = 2 }, .should_pass = false },
+        .{ .comparison = .above_or_equal, .threshold = .{ .unsigned = 3 }, .should_pass = true },
+        .{ .comparison = .above_or_equal, .threshold = .{ .unsigned = 4 }, .should_pass = false },
+    };
+    for (cases) |case| {
+        var result = try gatherThresholdViolations(
+            std.testing.allocator,
+            &.{file_info},
+            definition,
+            case.comparison,
+            case.threshold,
+        );
+        defer result.deinit(std.testing.allocator);
+        try std.testing.expectEqual(@as(usize, @intFromBool(!case.should_pass)), result.items().len);
+        if (!case.should_pass) {
+            const expectation = result.items()[0].custom_metric.expectation.threshold;
+            try std.testing.expectEqual(case.comparison, expectation.comparison);
+            try std.testing.expect(expectation.threshold.eql(case.threshold));
+            try std.testing.expectEqual(@as(u64, 3), result.items()[0].custom_metric.measured.unsigned);
+        }
+    }
+}
+
 const PredicateContext = struct {
     calls: *usize,
 
