@@ -20,6 +20,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('archunit.module("archunit")', release.consumer_build_zig())
         self.assertIn("haveNoCycles", release.architecture_test())
         self.assertNotIn(".path =", release.consumer_zon())
+        self.assertIn(".fingerprint = 0x1c2d2db2de015cbb", release.consumer_zon())
 
     def test_unknown_metadata_fields_fail_closed(self) -> None:
         source = json.loads(release.DEFAULT_METADATA.read_text(encoding="utf-8"))
