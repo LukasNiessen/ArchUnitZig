@@ -833,3 +833,48 @@ Consequence: count rules describe Zig syntax at stable reviewable subject bounda
 conditional types remain observable without brittle identities, malformed editor buffers do not
 manufacture facts, and later metric families share numeric evidence without inheriting a class
 ontology or floating-point precision loss.
+
+### D039 — Dependency metrics count distinct projected internal neighbors
+
+Dependency metrics operate after projection. Their pure input is an explicit complete internal label
+universe plus `ProjectedEdge` values. That boundary supports files, collapsed modules, slices,
+layers, or another deterministic projection without making domain modules import one another. The
+fluent facade supplies the file projection; other domains and tools call the same pure calculation.
+
+For a subject, afferent coupling (`Ca`) is the number of distinct internal source labels with an edge
+to it. Efferent coupling (`Ce`) is the number of distinct internal target labels it reaches. Raw
+import occurrences, parallel evidence on an aggregated projected pair, and duplicate projected pairs
+do not increase either count. Reciprocal directed edges do count independently. Self edges and pairs
+with only external evidence are excluded. If an aggregated pair contains any internal raw evidence,
+it is one internal edge. Internal evidence whose projected endpoint is absent from the declared
+internal universe is an invalid topology; purely external targets may be absent and are ignored.
+
+Instability is `Ce / (Ca + Ce)` and is defined as zero for an isolated subject. Coupling factor is
+`(Ca + Ce) / (2 * (N - 1))`, where `N` is the size of the complete projected internal universe. It
+is zero when `N <= 1`. The denominator models both possible directed relationships with every other
+subject, so the result remains bounded from zero to one. Fluent path selectors choose which subject
+results are returned but do not shrink `N` or otherwise reinterpret the topology.
+
+The file projection derives its subject universe only from normalized internal Zig self-edges. An
+internal ZON file or embedded resource may be a dependency object, but it is not a Zig source-file
+metric subject. File coupling retains only internal non-self edges whose endpoints are both source
+subjects. Standard-library, package, compiler, missing, resource-only, and other external evidence
+therefore cannot inflate source coupling.
+
+Afferent and efferent measurements remain tagged unsigned integers. Instability and coupling factor
+are finite `f64` ratios. Both reuse the shared comparison implementation and structured metric
+violation. Summaries expose selected counts/totals/averages while retaining the complete projected
+subject count that governed coupling-factor normalization.
+
+ArchUnitZig does not implement abstractness, distance from the main sequence, normalized distance,
+or zone-of-pain/uselessness rules. `pub` measures visibility, not abstractness. `opaque`, error sets,
+function types, and convention-based structural interfaces are different concepts and do not form a
+reviewable numerator equivalent to interfaces, abstract classes, and abstract methods. Naming a
+ratio of those declarations "abstractness" would fabricate cross-language parity. A future explicit
+interface convention may introduce a separately named metric, but it must not retroactively change
+this decision without its own specification and tests.
+
+Consequence: coupling values remain stable under duplicate imports and projection aggregation,
+selectors cannot improve a ratio by hiding neighbors from the denominator, module and slice views
+share the file math, and Zig users are not given class-oriented distance or zone results with an
+unrelated meaning.

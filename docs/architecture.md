@@ -247,6 +247,14 @@ facts, and threshold terminals emit the shared structured `metric` violation. Nu
 signed integers, unsigned integers, and floating-point values tagged rather than routing counts
 through `f64`. Class/interface vocabulary and class-level LCOM do not exist in this model.
 
+Dependency metrics consume a projected internal label universe and projected edge evidence. They
+count distinct directed neighbor labels rather than imports, so file, collapsed-module, and slice
+views share one calculation. The fluent facade builds the file projection from normalized Zig
+self-nodes and internal file-to-file edges, then applies path selectors only to the returned subjects;
+the full topology remains the normalization denominator. Resources and ZON dependency objects are
+not silently promoted to Zig source subjects. Abstractness and main-sequence distance have no Zig
+metric because visibility and opaque syntax do not establish abstract contracts.
+
 Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
 identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and
