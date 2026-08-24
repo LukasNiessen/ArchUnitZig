@@ -97,18 +97,11 @@ pub const Filter = struct {
         allocator: Allocator,
         candidate: Candidate,
     ) MatchError!bool {
-        if (!try self.matchesOwn(allocator, candidate)) return false;
-        for (self.exclusions.items) |*exclusion| {
-            const excluded = exclusion.matches(allocator, candidate) catch |failure| switch (failure) {
-                error.MissingDeclarationName => false,
-                error.OutOfMemory => return error.OutOfMemory,
-            };
-            if (excluded) return false;
-        }
-        return true;
+        if (!try self.matchesPositive(allocator, candidate)) return false;
+        return !try self.excludes(allocator, candidate);
     }
 
-    fn matchesOwn(
+    pub fn matchesPositive(
         self: *const Filter,
         allocator: Allocator,
         candidate: Candidate,
@@ -122,6 +115,21 @@ pub const Filter = struct {
         defer allocator.free(normalized);
         const selected = selectPathTarget(normalized, self.target());
         return self.matcher.matches(allocator, selected);
+    }
+
+    pub fn excludes(
+        self: *const Filter,
+        allocator: Allocator,
+        candidate: Candidate,
+    ) Allocator.Error!bool {
+        for (self.exclusions.items) |*exclusion| {
+            const excluded = exclusion.matches(allocator, candidate) catch |failure| switch (failure) {
+                error.MissingDeclarationName => false,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            if (excluded) return true;
+        }
+        return false;
     }
 };
 
