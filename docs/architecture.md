@@ -264,6 +264,12 @@ Module and slice builders reuse the public edge mapper and require mapped intern
 declare the complete projected subject universe. Measurements and violations clone all evidence
 that survives the callback.
 
+Metric selection terminals share one assertion layer. Five threshold verbs route tagged values to
+one comparator and produce `MetricViolation` data with measured value, comparison, and threshold.
+The sixth verb, `shouldSatisfy`, routes the value and scalar subject view to a borrowed predicate.
+Built-in predicate failures use `MetricPredicateViolation`; custom failures retain their described
+custom evidence. Predicate rules never manufacture a comparison or threshold that did not exist.
+
 Graph reports cross a separate renderer-independent snapshot boundary. `projectGraph` keeps project
 identity and owned query state lazy until `snapshot(CheckOptions)` extracts the normalized graph.
 Focus, reachability, and dependent selection produce a node set; collapse then maps those nodes and

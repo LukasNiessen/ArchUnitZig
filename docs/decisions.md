@@ -923,3 +923,33 @@ Consequence: users can define project-specific metrics at every Zig-relevant sub
 unsafe parser lifetimes or a fabricated universal module model, diagnostic output explains the
 meaning of the metric rather than only its name, and custom rules compose with the same lazy,
 allocator-explicit check pipeline as built-in rules.
+
+### D041 — Metric selections have five threshold verbs and one predicate verb
+
+Count, dependency-count, dependency-ratio, and custom metric selections expose exactly
+`shouldBeBelow`, `shouldBeAbove`, `shouldBe`, `shouldBeBelowOrEqual`, `shouldBeAboveOrEqual`, and
+`shouldSatisfy`. ArchUnitZig does not add synonyms such as `shouldEqual`, `atMost`, `atLeast`, or
+`between`. A small fixed vocabulary keeps rule discovery and cross-language review predictable.
+
+All five numeric verbs use the same pure comparator. `MetricValue` retains signed integers,
+unsigned integers, and `f64` values as distinct tags. Signed/unsigned comparisons are performed in
+integer space, including negative and maximum-width values. Integer and floating values are not
+implicitly mixed because a conversion can lose precision or change an equality boundary. Both
+calculated floats and float thresholds must be finite; NaN and positive or negative infinity abort
+the assertion as invalid numeric input.
+
+A threshold disagreement remains `MetricViolation`: it owns the target identifier, target kind,
+metric name, measured value, comparison, and threshold. `shouldSatisfy` has no threshold. Built-in
+predicate failures therefore use a separate `MetricPredicateViolation` containing target, metric,
+and measured value rather than fabricating comparison evidence. Custom predicates retain the D040
+custom violation because its owned metric description is part of their diagnostic contract.
+
+Built-in predicates reuse the D040 type-erased callback and scalar-only subject view. Count
+predicates receive the selected structural facts; file subjects also have their full-project
+dependency facts. Dependency predicates receive the complete coupling facts from which their value
+was selected. Callback contexts are borrowed, callback errors propagate unchanged, and an empty
+selection is guarded before the predicate runs.
+
+Consequence: every metric family reads with one terminal vocabulary, exact numeric boundaries are
+reviewable without silent coercion, arbitrary policies receive useful Zig context, and structured
+diagnostics distinguish threshold disagreement from predicate rejection.
