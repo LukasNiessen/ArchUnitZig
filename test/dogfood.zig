@@ -4,6 +4,7 @@ const archunit = @import("archunit");
 const Allocator = std.mem.Allocator;
 const production_exclusions = [_][]const u8{
     "build.zig",
+    "benchmark/**",
     "test/**",
 };
 const fixture_exclusions = [_][]const u8{"testdata/**"};
@@ -211,9 +212,10 @@ fn expectReportedPath(rule: anytype, violations: *const archunit.ViolationList, 
 }
 
 test "production corpus exclusions are explicit" {
-    try std.testing.expectEqual(@as(usize, 2), production_exclusions.len);
+    try std.testing.expectEqual(@as(usize, 3), production_exclusions.len);
     try std.testing.expectEqualStrings("build.zig", production_exclusions[0]);
-    try std.testing.expectEqualStrings("test/**", production_exclusions[1]);
+    try std.testing.expectEqualStrings("benchmark/**", production_exclusions[1]);
+    try std.testing.expectEqualStrings("test/**", production_exclusions[2]);
 
     var diagnostics = archunit.ErrorContext.init(std.testing.allocator);
     defer diagnostics.deinit();

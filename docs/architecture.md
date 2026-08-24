@@ -116,8 +116,9 @@ These boundaries are enforced against the repository by the external dogfood sui
 `test/dogfood.zig` imports only the public `archunit` package and runs after the external acceptance
 suite in `zig build test`. Its project locator and working directory are both `.`, exactly as they
 would be for a consumer checking its own repository. The production corpus deliberately excludes
-`build.zig` and `test/**`; the latter is the explicit exclusion for all test fixtures rather than an
-accidental consequence of nested-project discovery. The separate negative cycle control enters the
+`build.zig`, repository tooling under `benchmark/**`, and `test/**`; the latter is the explicit
+exclusion for all test fixtures rather than an accidental consequence of nested-project discovery.
+The separate negative cycle control enters the
 violating acceptance fixture through its own working directory and excludes only its malformed
 `testdata/**` subtree.
 

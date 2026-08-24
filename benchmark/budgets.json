@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "evidence": {
+    "status": "provisional",
+    "runner": "ubuntu-latest",
+    "run_url": null,
+    "observed_commit": null
+  },
+  "max_total_ns": 120000000000,
+  "max_peak_live_bytes": 1073741824,
+  "stages": {
+    "enumeration_ns": 5000000000,
+    "source_loading_ns": 5000000000,
+    "tokenize_parse_ns": 30000000000,
+    "resolution_classification_ns": 30000000000,
+    "normalization_ns": 30000000000,
+    "projection_ns": 30000000000,
+    "first_check_ns": 60000000000,
+    "cached_check_per_iteration_ns": 5000000000
+  }
+}
