@@ -1,0 +1,2 @@
+# The workspace-root policy addresses physical, root-relative paths.
+packages/shared/src/ignored_by_root.zig

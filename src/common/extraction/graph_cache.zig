@@ -63,24 +63,21 @@ pub fn buildGraphCacheKey(
     defer allocator.free(canonical_root);
     var root_policy = try archignore.load(allocator, io, canonical_root, diagnostics);
     defer root_policy.deinit(allocator);
-    var topology: ?workspace.Workspace = if (options.workspace.mode == .single_package)
-        null
-    else
-        try workspace.load(
-            allocator,
-            io,
-            canonical_root,
-            options.workspace,
-            &root_policy,
-            diagnostics,
-        );
-    defer if (topology) |*value| value.deinit(allocator);
+    var topology = try workspace.load(
+        allocator,
+        io,
+        canonical_root,
+        options.workspace,
+        &root_policy,
+        diagnostics,
+    );
+    defer topology.deinit(allocator);
     return buildCanonicalGraphCacheKey(
         allocator,
         canonical_root,
         options,
         &root_policy,
-        if (topology) |*value| value else null,
+        if (options.workspace.mode == .single_package) null else &topology,
         diagnostics,
     );
 }
@@ -94,25 +91,22 @@ pub fn buildGraphCacheKeyWithArchIgnore(
     root_policy: *const archignore.ArchIgnore,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!GraphCacheKey {
-    var topology: ?workspace.Workspace = if (options.workspace.mode == .single_package)
-        null
-    else
-        try workspace.load(
-            allocator,
-            io,
-            project_root,
-            options.workspace,
-            root_policy,
-            diagnostics,
-        );
-    defer if (topology) |*value| value.deinit(allocator);
+    var topology = try workspace.load(
+        allocator,
+        io,
+        project_root,
+        options.workspace,
+        root_policy,
+        diagnostics,
+    );
+    defer topology.deinit(allocator);
     return buildGraphCacheKeyWithContext(
         allocator,
         io,
         project_root,
         options,
         root_policy,
-        if (topology) |*value| value else null,
+        if (options.workspace.mode == .single_package) null else &topology,
         diagnostics,
     );
 }

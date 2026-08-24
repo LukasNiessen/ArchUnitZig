@@ -1,0 +1,7 @@
+.{
+    .name = .api,
+    .version = "0.0.0",
+    .fingerprint = 0xa100000000000002,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{ "build.zig.zon", "src" },
+}
