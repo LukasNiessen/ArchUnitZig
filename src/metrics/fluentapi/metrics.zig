@@ -20,10 +20,13 @@ pub const CheckOptions = fluentapi.CheckOptions;
 pub const CountMetric = count_calculation.CountMetric;
 pub const Filter = matching.Filter;
 pub const Pattern = matching.Pattern;
+pub const PatternTarget = matching.PatternTarget;
 pub const ScopePattern = assertion.ScopePattern;
 pub const StructuralMetrics = structural.StructuralMetrics;
 
 pub const BuilderError = Allocator.Error || error{
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
     InvalidPattern,
     InvalidProjectPath,
     InvalidMetricDescription,
@@ -126,20 +129,11 @@ const CompiledPattern = struct {
     }
 
     fn clone(self: *const CompiledPattern, allocator: Allocator) BuilderError!CompiledPattern {
-        return switch (self.evidence.syntax) {
-            .glob => initPattern(
-                allocator,
-                self.evidence.selector_index,
-                .{ .glob = self.evidence.expression },
-                self.evidence.target,
-            ),
-            .regex => initPattern(
-                allocator,
-                self.evidence.selector_index,
-                .{ .regex = self.evidence.expression },
-                self.evidence.target,
-            ),
-            .literal => initFile(allocator, self.evidence.selector_index, self.evidence.expression),
+        var filter = self.filter.clone(allocator) catch |failure| return mapPatternFailure(failure);
+        errdefer filter.deinit();
+        return .{
+            .evidence = try self.evidence.clone(allocator),
+            .filter = filter,
         };
     }
 
@@ -152,6 +146,7 @@ const CompiledPattern = struct {
 
 const Selector = struct {
     alternatives: std.ArrayList(CompiledPattern) = .empty,
+    exclusions: std.ArrayList(ScopePattern) = .empty,
 
     fn initPatterns(
         allocator: Allocator,
@@ -200,13 +195,52 @@ const Selector = struct {
         for (self.alternatives.items) |*alternative| {
             result.alternatives.appendAssumeCapacity(try alternative.clone(allocator));
         }
+        try result.exclusions.ensureTotalCapacity(allocator, self.exclusions.items.len);
+        for (self.exclusions.items) |exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(allocator));
+        }
         return result;
     }
 
     fn deinit(self: *Selector, allocator: Allocator) void {
         for (self.alternatives.items) |*alternative| alternative.deinit(allocator);
         self.alternatives.deinit(allocator);
+        for (self.exclusions.items) |*exclusion| exclusion.deinit(allocator);
+        self.exclusions.deinit(allocator);
         self.* = undefined;
+    }
+
+    fn inheritedTarget(self: *const Selector) PatternTarget {
+        return self.alternatives.items[0].evidence.target;
+    }
+
+    fn addExclusions(
+        self: *Selector,
+        allocator: Allocator,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!void {
+        if (patterns.len == 0) return error.InvalidPattern;
+        try self.exclusions.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            if (pattern.source().len == 0) return error.InvalidPattern;
+            const mode: matching.MatchingMode = switch (pattern) {
+                .glob => .exact,
+                .regex => .partial,
+            };
+            for (self.alternatives.items) |*alternative| {
+                alternative.filter.addExclusion(pattern, target, mode) catch |failure| {
+                    return mapPatternFailure(failure);
+                };
+            }
+            self.exclusions.appendAssumeCapacity(try ScopePattern.initExclusion(
+                allocator,
+                self.alternatives.items[0].evidence.selector_index,
+                pattern,
+                target,
+                mode,
+            ));
+        }
     }
 
     fn matches(
@@ -218,21 +252,29 @@ const Selector = struct {
     ) Allocator.Error!bool {
         for (self.alternatives.items) |*alternative| {
             const candidate = matching.Candidate{ .path = path, .declaration_name = declaration_name };
-            if (alternative.filter.matches(allocator, candidate) catch |failure| switch (failure) {
+            var positive = alternative.filter.matchesPositive(allocator, candidate) catch |failure| switch (failure) {
                 error.MissingDeclarationName => false,
                 error.OutOfMemory => return error.OutOfMemory,
-            }) return true;
-            if (alternative.evidence.target != .declaration_name) continue;
-            const qualified = qualified_name orelse continue;
-            const simple = declaration_name orelse continue;
-            if (std.mem.eql(u8, simple, qualified)) continue;
-            if (alternative.filter.matches(allocator, .{
+            };
+            const distinct_qualified = alternative.evidence.target == .declaration_name and
+                qualified_name != null and declaration_name != null and
+                !std.mem.eql(u8, declaration_name.?, qualified_name.?);
+            if (distinct_qualified and !positive) {
+                positive = alternative.filter.matchesPositive(allocator, .{
+                    .path = path,
+                    .declaration_name = qualified_name.?,
+                }) catch |failure| switch (failure) {
+                    error.MissingDeclarationName => unreachable,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
+            }
+            if (!positive) continue;
+            if (try alternative.filter.excludes(allocator, candidate)) continue;
+            if (distinct_qualified and try alternative.filter.excludes(allocator, .{
                 .path = path,
-                .declaration_name = qualified,
-            }) catch |failure| switch (failure) {
-                error.MissingDeclarationName => unreachable,
-                error.OutOfMemory => return error.OutOfMemory,
-            }) return true;
+                .declaration_name = qualified_name.?,
+            })) continue;
+            return true;
         }
         return false;
     }
@@ -308,6 +350,18 @@ pub const MetricsScope = struct {
             return error.OutOfMemory;
         };
         return result;
+    }
+
+    pub fn except(self: *const MetricsScope, patterns: []const Pattern) BuilderError!MetricsScope {
+        return self.excludePatterns(patterns, null);
+    }
+
+    pub fn exceptTargeted(
+        self: *const MetricsScope,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!MetricsScope {
+        return self.excludePatterns(patterns, target);
     }
 
     /// Switches the subject level to every named declaration and matches both simple and qualified
@@ -427,11 +481,16 @@ pub const MetricsScope = struct {
         var result = ScopePatterns{};
         errdefer result.deinit(allocator);
         var count_value: usize = 0;
-        for (self.selectors.items) |selector| count_value += selector.alternatives.items.len;
+        for (self.selectors.items) |selector| {
+            count_value += selector.alternatives.items.len + selector.exclusions.items.len;
+        }
         try result.values.ensureTotalCapacity(allocator, count_value);
         for (self.selectors.items) |selector| {
             for (selector.alternatives.items) |alternative| {
                 result.values.appendAssumeCapacity(try alternative.evidence.clone(allocator));
+            }
+            for (selector.exclusions.items) |exclusion| {
+                result.values.appendAssumeCapacity(try exclusion.clone(allocator));
             }
         }
         return result;
@@ -463,6 +522,24 @@ pub const MetricsScope = struct {
             selector.deinit(self.allocator);
             return error.OutOfMemory;
         };
+        return result;
+    }
+
+    fn excludePatterns(
+        self: *const MetricsScope,
+        patterns: []const Pattern,
+        explicit_target: ?PatternTarget,
+    ) BuilderError!MetricsScope {
+        if (self.selectors.items.len == 0) return error.ExclusionWithoutSelector;
+        const target = explicit_target orelse self.selectors.items[self.selectors.items.len - 1].inheritedTarget();
+        if (target == .declaration_name and self.target_level == .file) return error.InvalidExclusionTarget;
+        var result = try self.clone();
+        errdefer result.deinit();
+        try result.selectors.items[result.selectors.items.len - 1].addExclusions(
+            result.allocator,
+            patterns,
+            target,
+        );
         return result;
     }
 
@@ -498,6 +575,13 @@ pub const MetricsScope = struct {
                 try writer.print("\"{f}\"", .{std.zig.fmtString(alternative.evidence.expression)});
             }
             if (alternatives.len > 1) try writer.writeByte(')');
+            for (selector.exclusions.items) |exclusion| {
+                try writer.writeAll(", except ");
+                try writer.writeAll(selectorPhrase(exclusion, self.target_level));
+                try writer.writeByte(' ');
+                if (exclusion.syntax == .regex) try writer.writeAll("regex ");
+                try writer.print("\"{f}\"", .{std.zig.fmtString(exclusion.expression)});
+            }
         }
     }
 };
@@ -1887,6 +1971,84 @@ test "file and container selectors analyze the real structural fixture" {
     try std.testing.expectEqual(@as(usize, 1), nested_qualified_analysis.subjects.items.len);
 }
 
+test "metric exclusions cover file simple-name and qualified declaration-name candidates" {
+    const options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    try std.testing.expectError(error.ExclusionWithoutSelector, root.except(&.{.{ .glob = "generated/**" }}));
+
+    var source = try root.inPath(&.{.{ .glob = "src/**" }});
+    defer source.deinit();
+    var without_support = try source.exceptTargeted(&.{.{ .glob = "support.zig" }}, .filename);
+    defer without_support.deinit();
+    var file_analysis = try without_support.analyze(options);
+    defer file_analysis.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), file_analysis.subjects.items.len);
+    try std.testing.expectEqualStrings("src/root.zig", file_analysis.subjects.items[0].identifier);
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        source.exceptTargeted(&.{.{ .glob = "Worker" }}, .declaration_name),
+    );
+
+    var declarations = try root.forDeclarationsMatching(&.{.{ .glob = "*" }});
+    defer declarations.deinit();
+    var without_nested = try declarations.except(&.{.{ .glob = "Namespace.Nested" }});
+    defer without_nested.deinit();
+    var nested_analysis = try without_nested.analyze(options);
+    defer nested_analysis.deinit(std.testing.allocator);
+    var namespace_seen = false;
+    for (nested_analysis.subjects.items) |subject| {
+        const qualified = subject.qualified_name orelse subject.name;
+        try std.testing.expect(!std.mem.eql(u8, qualified, "Namespace.Nested"));
+        if (std.mem.eql(u8, qualified, "Namespace")) namespace_seen = true;
+    }
+    try std.testing.expect(namespace_seen);
+    var without_support_declarations = try without_nested.exceptTargeted(
+        &.{.{ .glob = "support.zig" }},
+        .filename,
+    );
+    defer without_support_declarations.deinit();
+    var declaration_analysis = try without_support_declarations.analyze(options);
+    defer declaration_analysis.deinit(std.testing.allocator);
+    for (declaration_analysis.subjects.items) |subject| {
+        try std.testing.expect(!std.mem.eql(u8, subject.qualified_name orelse subject.name, "Namespace.Nested"));
+        try std.testing.expect(!std.mem.eql(u8, subject.file_path, "src/support.zig"));
+    }
+    var original_analysis = try declarations.analyze(options);
+    defer original_analysis.deinit(std.testing.allocator);
+    try std.testing.expect(original_analysis.subjects.items.len > declaration_analysis.subjects.items.len);
+
+    const description = try without_support_declarations.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings(
+        "Zig declarations, with declaration name \"*\", except with declaration name \"Namespace.Nested\", except with name \"support.zig\"",
+        description,
+    );
+    var evidence = try without_support_declarations.scopePatterns(std.testing.allocator);
+    defer evidence.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 3), evidence.items().len);
+    try std.testing.expect(evidence.items()[1].is_exclusion);
+    try std.testing.expectEqual(PatternTarget.filename, evidence.items()[2].target);
+}
+
+test "container exclusions keep target-level vocabulary in descriptions" {
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var containers = try root.forContainersMatching(&.{.{ .glob = "*" }});
+    defer containers.deinit();
+    var without_worker = try containers.except(&.{.{ .regex = "^Worker$" }});
+    defer without_worker.deinit();
+    var analysis = try without_worker.analyze(CheckOptions.init(std.testing.allocator, std.testing.io));
+    defer analysis.deinit(std.testing.allocator);
+    for (analysis.subjects.items) |subject| try std.testing.expect(!std.mem.eql(u8, subject.name, "Worker"));
+    const description = try without_worker.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings(
+        "Zig containers, with container name \"*\", except with container name regex \"^Worker$\"",
+        description,
+    );
+}
+
 test "count measurements and summaries use selected subject facts" {
     var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
     defer root.deinit();
@@ -2796,7 +2958,11 @@ fn exerciseBuilderAllocationFailures(allocator: Allocator) !void {
     defer selected.deinit();
     var declarations = try selected.forDeclarationsMatching(&.{.{ .regex = "Service$" }});
     defer declarations.deinit();
-    var counts = try declarations.count();
+    var current = try declarations.except(&.{.{ .glob = "LegacyService" }});
+    defer current.deinit();
+    var generated_free = try current.exceptTargeted(&.{.{ .glob = "generated.zig" }}, .filename);
+    defer generated_free.deinit();
+    var counts = try generated_free.count();
     defer counts.deinit();
     var functions = try counts.functions();
     defer functions.deinit();

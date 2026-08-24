@@ -20,6 +20,8 @@ pub const LayerError = Allocator.Error || error{
     DuplicateLayerTarget,
     EmptyBlocklist,
     EmptyLayerDefinition,
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
     InvalidLayerName,
     InvalidPattern,
     UnknownLayer,
@@ -50,12 +52,14 @@ const LayerSelector = struct {
     }
 
     fn clone(self: *const LayerSelector, allocator: Allocator) LayerError!LayerSelector {
-        const pattern: Pattern = switch (self.evidence.syntax) {
-            .glob => .{ .glob = self.evidence.expression },
-            .regex => .{ .regex = self.evidence.expression },
-            .literal => unreachable,
+        var filter = self.filter.clone(allocator) catch |failure| {
+            return if (failure == error.OutOfMemory) error.OutOfMemory else error.InvalidPattern;
         };
-        return init(allocator, pattern, self.evidence.target);
+        errdefer filter.deinit();
+        return .{
+            .evidence = try self.evidence.clone(allocator),
+            .filter = filter,
+        };
     }
 
     fn deinit(self: *LayerSelector, allocator: Allocator) void {
@@ -69,6 +73,7 @@ const LayerSelector = struct {
 pub const LayerDefinition = struct {
     name: []const u8,
     selectors: std.ArrayList(LayerSelector) = .empty,
+    exclusions: std.ArrayList(ScopePattern) = .empty,
 
     pub fn init(
         allocator: Allocator,
@@ -95,6 +100,10 @@ pub const LayerDefinition = struct {
         for (self.selectors.items) |*selector| {
             result.selectors.appendAssumeCapacity(try selector.clone(allocator));
         }
+        try result.exclusions.ensureTotalCapacity(allocator, self.exclusions.items.len);
+        for (self.exclusions.items) |exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(allocator));
+        }
         return result;
     }
 
@@ -102,7 +111,43 @@ pub const LayerDefinition = struct {
         allocator.free(self.name);
         for (self.selectors.items) |*selector| selector.deinit(allocator);
         self.selectors.deinit(allocator);
+        for (self.exclusions.items) |*exclusion| exclusion.deinit(allocator);
+        self.exclusions.deinit(allocator);
         self.* = undefined;
+    }
+
+    pub fn inheritedTarget(self: *const LayerDefinition) PatternTarget {
+        return self.selectors.items[0].evidence.target;
+    }
+
+    pub fn addExclusions(
+        self: *LayerDefinition,
+        allocator: Allocator,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) LayerError!void {
+        if (patterns.len == 0) return error.InvalidPattern;
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        try self.exclusions.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            if (pattern.source().len == 0) return error.InvalidPattern;
+            const mode: matching.MatchingMode = switch (pattern) {
+                .glob => .exact,
+                .regex => .partial,
+            };
+            for (self.selectors.items) |*selector| {
+                selector.filter.addExclusion(pattern, target, mode) catch |failure| {
+                    return if (failure == error.OutOfMemory) error.OutOfMemory else error.InvalidPattern;
+                };
+            }
+            self.exclusions.appendAssumeCapacity(try ScopePattern.initExclusion(
+                allocator,
+                0,
+                pattern,
+                target,
+                mode,
+            ));
+        }
     }
 
     pub fn matches(self: *const LayerDefinition, allocator: Allocator, path: []const u8) Allocator.Error!bool {
@@ -121,15 +166,20 @@ pub const LayerDefinition = struct {
         allocator: Allocator,
         destination: *std.ArrayList(ScopePattern),
     ) Allocator.Error!void {
-        try destination.ensureUnusedCapacity(allocator, self.selectors.items.len);
+        try destination.ensureUnusedCapacity(allocator, self.selectors.items.len + self.exclusions.items.len);
         for (self.selectors.items) |selector| destination.appendAssumeCapacity(selector.evidence);
+        for (self.exclusions.items) |exclusion| destination.appendAssumeCapacity(exclusion);
     }
 
     pub fn eql(self: LayerDefinition, other: LayerDefinition) bool {
         if (!std.mem.eql(u8, self.name, other.name) or
-            self.selectors.items.len != other.selectors.items.len) return false;
+            self.selectors.items.len != other.selectors.items.len or
+            self.exclusions.items.len != other.exclusions.items.len) return false;
         for (self.selectors.items, other.selectors.items) |left, right| {
             if (!left.evidence.eql(right.evidence)) return false;
+        }
+        for (self.exclusions.items, other.exclusions.items) |left, right| {
+            if (!left.eql(right)) return false;
         }
         return true;
     }

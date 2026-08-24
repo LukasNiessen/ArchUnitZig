@@ -79,6 +79,21 @@ filename, or Zig declaration/type name. Patterns supplied in one selector call a
 (OR); repeated selector calls are cumulative (AND). Empty alternatives match nothing and zero
 selector calls match everything.
 
+Each `Filter` also owns zero or more compiled exclusion filters. Evaluation is
+`positive alternatives AND NOT excluded alternatives`; exclusions never become a separate pass in
+the files, layers, slices, metrics, or graph-report domains. `except` inherits the target and
+matching mode of the selector immediately before it, while `exceptTargeted` selects an explicit
+target. Declaration-name targets are valid only when the candidate has declaration/container
+identity. An exclusion without a preceding selector, or a declaration target in a path-only
+domain, is a stable user error.
+
+Selector evidence retains positive and exclusion patterns in order so empty-test diagnostics and
+descriptions explain what was removed. File subjects and dependency objects apply the same filter
+contract. Layers exclude paths before ordered ownership is assigned. Slices exclude project paths
+before projection. Graph queries exclude only seed matches before depth or closure traversal; nodes
+reached from an included seed remain visible. Metrics match a declaration's simple and qualified
+name consistently for both positive and negative filters.
+
 ## Module boundaries
 
 ```text

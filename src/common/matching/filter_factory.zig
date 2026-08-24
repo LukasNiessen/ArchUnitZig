@@ -31,7 +31,10 @@ pub fn declarationNameMatcher(
 pub fn exactFileMatcher(allocator: Allocator, file_path: []const u8) regex_factory.ExactFileError!Filter {
     const normalized = try common_path.normalize(allocator, file_path);
     defer allocator.free(normalized);
-    return .{ .matcher = try regex_factory.exactFileMatcher(allocator, normalized) };
+    return .{
+        .allocator = allocator,
+        .matcher = try regex_factory.exactFileMatcher(allocator, normalized),
+    };
 }
 
 test "factory surface creates filters for every target" {

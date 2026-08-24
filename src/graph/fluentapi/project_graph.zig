@@ -17,9 +17,12 @@ pub const Graph = extraction.Graph;
 pub const GraphQueryOptions = query_options.GraphQueryOptions;
 pub const GraphReportSnapshot = report.GraphReportSnapshot;
 pub const Pattern = matching.Pattern;
+pub const PatternTarget = matching.PatternTarget;
 
 pub const BuilderError = Allocator.Error || pattern_module.CompileError || collapse_module.CollapseError || error{
     InvalidPattern,
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
     InvalidProjectPath,
     InvalidTitle,
 };
@@ -36,16 +39,26 @@ pub const ProjectGraphBuilder = struct {
     include_external_dependencies: bool,
     include_self_dependencies: bool,
     focus: ?OwnedFocus,
+    focus_exclusions: OwnedExclusions = .{},
     reachable_from: ?OwnedPattern,
+    reachable_from_exclusions: OwnedExclusions = .{},
     dependents_of: ?OwnedPattern,
+    dependents_of_exclusions: OwnedExclusions = .{},
     collapse: ?OwnedCollapse,
     title: []u8,
+    last_query: ?QueryKind = null,
 
     fn init(allocator: Allocator, options: ProjectGraphOptions) BuilderError!ProjectGraphBuilder {
         if (options.locator) |locator| {
             if (!containsNonWhitespace(locator)) return error.InvalidProjectPath;
         }
         if (!containsNonWhitespace(options.query.title)) return error.InvalidTitle;
+        if ((options.query.focus == null and options.query.focus_exclusions.len != 0) or
+            (options.query.reachable_from == null and options.query.reachable_from_exclusions.len != 0) or
+            (options.query.dependents_of == null and options.query.dependents_of_exclusions.len != 0))
+        {
+            return error.ExclusionWithoutSelector;
+        }
 
         var result: ProjectGraphBuilder = result: {
             const project_locator = if (options.locator) |locator| try allocator.dupe(u8, locator) else null;
@@ -69,12 +82,15 @@ pub const ProjectGraphBuilder = struct {
             .pattern = try OwnedPattern.init(allocator, focus.pattern),
             .depth = focus.depth,
         };
+        try result.focus_exclusions.initFrom(allocator, options.query.focus_exclusions);
         if (options.query.reachable_from) |pattern| {
             result.reachable_from = try OwnedPattern.init(allocator, pattern);
         }
+        try result.reachable_from_exclusions.initFrom(allocator, options.query.reachable_from_exclusions);
         if (options.query.dependents_of) |pattern| {
             result.dependents_of = try OwnedPattern.init(allocator, pattern);
         }
+        try result.dependents_of_exclusions.initFrom(allocator, options.query.dependents_of_exclusions);
         if (options.query.collapse) |collapse| {
             var validator = try collapse_module.Collapser.init(allocator, collapse);
             defer validator.deinit();
@@ -84,17 +100,22 @@ pub const ProjectGraphBuilder = struct {
     }
 
     pub fn clone(self: *const ProjectGraphBuilder) BuilderError!ProjectGraphBuilder {
-        return init(self.allocator, .{
+        var result = try init(self.allocator, .{
             .locator = self.project_locator,
             .query = self.queryOptions(),
         });
+        result.last_query = self.last_query;
+        return result;
     }
 
     pub fn deinit(self: *ProjectGraphBuilder) void {
         if (self.project_locator) |locator| self.allocator.free(locator);
         if (self.focus) |*focus| focus.pattern.deinit(self.allocator);
+        self.focus_exclusions.deinit(self.allocator);
         if (self.reachable_from) |*pattern| pattern.deinit(self.allocator);
+        self.reachable_from_exclusions.deinit(self.allocator);
         if (self.dependents_of) |*pattern| pattern.deinit(self.allocator);
+        self.dependents_of_exclusions.deinit(self.allocator);
         if (self.collapse) |*collapse| collapse.deinit(self.allocator);
         self.allocator.free(self.title);
         self.* = undefined;
@@ -119,19 +140,61 @@ pub const ProjectGraphBuilder = struct {
     ) BuilderError!ProjectGraphBuilder {
         var query = self.queryOptions();
         query.focus = .{ .pattern = pattern, .depth = depth };
-        return init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        query.focus_exclusions = &.{};
+        var result = try init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        result.last_query = .focus;
+        return result;
     }
 
     pub fn reachableFrom(self: *const ProjectGraphBuilder, pattern: Pattern) BuilderError!ProjectGraphBuilder {
         var query = self.queryOptions();
         query.reachable_from = pattern;
-        return init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        query.reachable_from_exclusions = &.{};
+        var result = try init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        result.last_query = .reachable_from;
+        return result;
     }
 
     pub fn dependentsOf(self: *const ProjectGraphBuilder, pattern: Pattern) BuilderError!ProjectGraphBuilder {
         var query = self.queryOptions();
         query.dependents_of = pattern;
-        return init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        query.dependents_of_exclusions = &.{};
+        var result = try init(self.allocator, .{ .locator = self.project_locator, .query = query });
+        result.last_query = .dependents_of;
+        return result;
+    }
+
+    pub fn except(
+        self: *const ProjectGraphBuilder,
+        patterns: []const Pattern,
+    ) BuilderError!ProjectGraphBuilder {
+        return self.excludePatterns(patterns, .path);
+    }
+
+    pub fn exceptTargeted(
+        self: *const ProjectGraphBuilder,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!ProjectGraphBuilder {
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        return self.excludePatterns(patterns, target);
+    }
+
+    fn excludePatterns(
+        self: *const ProjectGraphBuilder,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!ProjectGraphBuilder {
+        const query_kind = self.last_query orelse return error.ExclusionWithoutSelector;
+        if (patterns.len == 0) return error.InvalidPattern;
+        var result = try self.clone();
+        errdefer result.deinit();
+        switch (query_kind) {
+            .focus => try result.focus_exclusions.append(result.allocator, patterns, target),
+            .reachable_from => try result.reachable_from_exclusions.append(result.allocator, patterns, target),
+            .dependents_of => try result.dependents_of_exclusions.append(result.allocator, patterns, target),
+        }
+        return result;
     }
 
     pub fn collapseToFolderDepth(
@@ -275,11 +338,91 @@ pub const ProjectGraphBuilder = struct {
                 .pattern = focus.pattern.borrowed(),
                 .depth = focus.depth,
             } else null,
+            .focus_exclusions = self.focus_exclusions.items(),
             .reachable_from = if (self.reachable_from) |pattern| pattern.borrowed() else null,
+            .reachable_from_exclusions = self.reachable_from_exclusions.items(),
             .dependents_of = if (self.dependents_of) |pattern| pattern.borrowed() else null,
+            .dependents_of_exclusions = self.dependents_of_exclusions.items(),
             .collapse = if (self.collapse) |collapse| collapse.borrowed() else null,
             .title = self.title,
         };
+    }
+};
+
+const QueryKind = enum { focus, reachable_from, dependents_of };
+
+const OwnedPatternExclusion = struct {
+    pattern: OwnedPattern,
+    target: PatternTarget,
+
+    fn init(
+        allocator: Allocator,
+        exclusion: query_options.PatternExclusion,
+    ) BuilderError!OwnedPatternExclusion {
+        if (exclusion.target == .declaration_name) return error.InvalidExclusionTarget;
+        return .{
+            .pattern = try OwnedPattern.init(allocator, exclusion.pattern),
+            .target = exclusion.target,
+        };
+    }
+
+    fn deinit(self: *OwnedPatternExclusion, allocator: Allocator) void {
+        self.pattern.deinit(allocator);
+        self.* = undefined;
+    }
+
+    fn borrowed(self: *const OwnedPatternExclusion) query_options.PatternExclusion {
+        return .{ .pattern = self.pattern.borrowed(), .target = self.target };
+    }
+};
+
+const OwnedExclusions = struct {
+    values: std.ArrayList(OwnedPatternExclusion) = .empty,
+    borrowed_values: std.ArrayList(query_options.PatternExclusion) = .empty,
+
+    fn initFrom(
+        self: *OwnedExclusions,
+        allocator: Allocator,
+        exclusions: []const query_options.PatternExclusion,
+    ) BuilderError!void {
+        try self.values.ensureTotalCapacity(allocator, exclusions.len);
+        for (exclusions) |exclusion| {
+            self.values.appendAssumeCapacity(try OwnedPatternExclusion.init(allocator, exclusion));
+        }
+        try self.refreshBorrowed(allocator);
+    }
+
+    fn append(
+        self: *OwnedExclusions,
+        allocator: Allocator,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!void {
+        try self.values.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            self.values.appendAssumeCapacity(try OwnedPatternExclusion.init(allocator, .{
+                .pattern = pattern,
+                .target = target,
+            }));
+        }
+        try self.refreshBorrowed(allocator);
+    }
+
+    fn refreshBorrowed(self: *OwnedExclusions, allocator: Allocator) Allocator.Error!void {
+        self.borrowed_values.clearRetainingCapacity();
+        try self.borrowed_values.ensureTotalCapacity(allocator, self.values.items.len);
+        for (self.values.items) |*value| self.borrowed_values.appendAssumeCapacity(value.borrowed());
+    }
+
+    fn items(self: *const OwnedExclusions) []const query_options.PatternExclusion {
+        return self.borrowed_values.items;
+    }
+
+    fn deinit(self: *OwnedExclusions, allocator: Allocator) void {
+        self.borrowed_values.deinit(allocator);
+        for (self.values.items) |*value| value.deinit(allocator);
+        self.values.deinit(allocator);
+        self.* = undefined;
     }
 };
 
@@ -398,6 +541,46 @@ test "graph builder modifiers are owned and branchable" {
     try std.testing.expect(cloned.title.ptr != titled_builder.title.ptr);
 }
 
+test "graph exclusions attach only to the immediately preceding query and own patterns" {
+    var base = try projectGraph(std.testing.allocator, .{});
+    defer base.deinit();
+    try std.testing.expectError(error.ExclusionWithoutSelector, base.except(&.{.{ .glob = "generated/**" }}));
+    var focused = try base.focusOn(.{ .glob = "src/**" }, 1);
+    defer focused.deinit();
+    var generated_pattern = [_]u8{ 's', 'r', 'c', '/', '*', '*', '/', 'g', 'e', 'n', 'e', 'r', 'a', 't', 'e', 'd', '/', '*', '*' };
+    var no_generated = try focused.except(&.{.{ .glob = &generated_pattern }});
+    defer no_generated.deinit();
+    @memset(&generated_pattern, 'x');
+    var production = try no_generated.exceptTargeted(&.{.{ .regex = "_test\\.zig$" }}, .filename);
+    defer production.deinit();
+    try std.testing.expectEqual(@as(usize, 2), production.queryOptions().focus_exclusions.len);
+    try std.testing.expectEqualStrings(
+        "src/**/generated/**",
+        production.queryOptions().focus_exclusions[0].pattern.source(),
+    );
+
+    var reachable = try production.reachableFrom(.{ .glob = "src/root.zig" });
+    defer reachable.deinit();
+    var without_generated_roots = try reachable.exceptTargeted(
+        &.{.{ .glob = "root.zig" }},
+        .filename,
+    );
+    defer without_generated_roots.deinit();
+    try std.testing.expectEqual(@as(usize, 2), without_generated_roots.queryOptions().focus_exclusions.len);
+    try std.testing.expectEqual(@as(usize, 1), without_generated_roots.queryOptions().reachable_from_exclusions.len);
+
+    var titled_builder = try production.titled("Filtered graph");
+    defer titled_builder.deinit();
+    try std.testing.expectError(
+        error.ExclusionWithoutSelector,
+        titled_builder.except(&.{.{ .glob = "late/**" }}),
+    );
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        focused.exceptTargeted(&.{.{ .glob = "Legacy" }}, .declaration_name),
+    );
+}
+
 test "all modifiers compose and the dependency graph alias has the same entry contract" {
     var base = try dependencyGraph(std.testing.allocator, .{});
     defer base.deinit();
@@ -426,6 +609,13 @@ test "builder validates project title patterns folder depth and replacements ear
     );
     var base = try projectGraph(std.testing.allocator, .{});
     defer base.deinit();
+    const orphan_exclusion = [_]query_options.PatternExclusion{.{
+        .pattern = .{ .glob = "generated/**" },
+        .target = .path,
+    }};
+    try std.testing.expectError(error.ExclusionWithoutSelector, projectGraph(std.testing.allocator, .{
+        .query = .{ .focus_exclusions = &orphan_exclusion },
+    }));
     try std.testing.expectError(error.InvalidTitle, base.titled("\n"));
     try std.testing.expectError(error.InvalidPattern, base.focusOn(.{ .glob = "" }, 1));
     try std.testing.expectError(error.MissingParen, base.reachableFrom(.{ .regex = "(" }));
@@ -441,9 +631,13 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer base.deinit();
     var focused = try base.focusOn(.{ .regex = "src/(app|domain)" }, 2);
     defer focused.deinit();
-    var reachable = try focused.reachableFrom(.{ .glob = "src/app/**" });
+    var production = try focused.except(&.{.{ .glob = "src/generated/**" }});
+    defer production.deinit();
+    var reachable = try production.reachableFrom(.{ .glob = "src/app/**" });
     defer reachable.deinit();
-    var collapsed = try reachable.collapseByPattern("^src/([^/]+)/.*$", "$1");
+    var current = try reachable.exceptTargeted(&.{.{ .regex = "_generated\\.zig$" }}, .filename);
+    defer current.deinit();
+    var collapsed = try current.collapseByPattern("^src/([^/]+)/.*$", "$1");
     defer collapsed.deinit();
     var titled_builder = try collapsed.titled("Allocation-safe graph");
     defer titled_builder.deinit();
@@ -501,6 +695,23 @@ test "real Zig fixture extracts focus external compiler and resource nodes lazil
     const compiler = findSnapshotEdge(&snapshot_value, "src/app/main.zig", "std").?;
     try std.testing.expect(compiler.external);
     try std.testing.expect(compiler.target_classes.contains(.compiler));
+}
+
+test "real graph fixture excludes focused filenames before snapshot projection" {
+    var base = try projectGraph(std.testing.allocator, .{ .locator = "test/fixtures/graph-basic" });
+    defer base.deinit();
+    var focused = try base.focusOn(.{ .glob = "src/**" }, 0);
+    defer focused.deinit();
+    var without_main = try focused.exceptTargeted(&.{.{ .glob = "main.zig" }}, .filename);
+    defer without_main.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var snapshot_value = try without_main.snapshot(options);
+    defer snapshot_value.deinit(std.testing.allocator);
+    for (snapshot_value.nodes) |node| {
+        try std.testing.expect(!std.mem.eql(u8, node.label, "src/app/main.zig"));
+    }
+    try std.testing.expect(snapshot_value.summary.node_count > 0);
 }
 
 test "real fixture composes extraction options with collapse aggregation and summary" {

@@ -521,7 +521,12 @@ fn writeEnumSet(writer: *std.Io.Writer, comptime E: type, values: std.EnumSet(E)
 fn writeScope(writer: *std.Io.Writer, scope: []const assertion.ScopePattern) std.Io.Writer.Error!void {
     for (scope, 0..) |pattern, index| {
         if (index != 0) {
-            try writer.writeAll(if (pattern.selector_index == scope[index - 1].selector_index) " OR " else " AND ");
+            if (pattern.is_exclusion) {
+                try writer.writeAll(" EXCEPT ");
+            } else {
+                try writer.writeAll(if (pattern.selector_index == scope[index - 1].selector_index and
+                    !scope[index - 1].is_exclusion) " OR " else " AND ");
+            }
         }
         try writer.print(
             "{s} {s} \"{f}\" ({s})",
@@ -727,6 +732,47 @@ test "empty and custom file formatters produce stable golden details" {
             "Summary: 42 bytes, 3 non-blank lines, 0 imports\n" ++
             "Declarations: unavailable",
         formatted_custom.details,
+    );
+}
+
+test "empty test formatter preserves exclusion evidence in selector order" {
+    var positive = try assertion.ScopePattern.init(
+        std.testing.allocator,
+        0,
+        .{ .glob = "src/**" },
+        .path,
+        .exact,
+    );
+    defer positive.deinit(std.testing.allocator);
+    var generated = try assertion.ScopePattern.initExclusion(
+        std.testing.allocator,
+        0,
+        .{ .regex = "(^|/)generated/" },
+        .path_without_filename,
+        .exact,
+    );
+    defer generated.deinit(std.testing.allocator);
+    var payload = try assertion.EmptyTestViolation.init(
+        std.testing.allocator,
+        "files.have_no_cycles",
+        &.{ positive, generated },
+        false,
+    );
+    var violation = assertion.Violation.fromEmptyTestMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "project files in path src/**, except folder regex (^|/)generated/, should have no cycles",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        "Rule: project files in path src/**, except folder regex (^|/)generated/, should have no cycles\n" ++
+            "Rule id: files.have_no_cycles\n" ++
+            "Reason: no files matched the rule scope\n" ++
+            "Selectors: path glob \"src/**\" (exact) EXCEPT folder regex \"(^|/)generated/\" (exact)",
+        formatted.details,
     );
 }
 

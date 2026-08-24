@@ -4,6 +4,7 @@ const adjacency_module = @import("../../common/projection/cycles/adjacency.zig")
 const extraction = @import("../../common/extraction.zig");
 const query_options = @import("query_options.zig");
 const regex_module = @import("../../common/matching/regex.zig");
+const matching = @import("../../common/matching.zig");
 
 const Adjacency = adjacency_module.Adjacency;
 const Allocator = std.mem.Allocator;
@@ -11,7 +12,10 @@ pub const Graph = extraction.Graph;
 pub const GraphQueryOptions = query_options.GraphQueryOptions;
 pub const SelectionError = Allocator.Error ||
     @import("../../common/matching/pattern.zig").CompileError ||
-    regex_module.Regex.MatchError;
+    regex_module.Regex.MatchError || error{
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
+};
 
 /// Sorted node labels borrowed from the source graph; only the outer slice is owned.
 pub const NodeSelection = struct {
@@ -32,6 +36,15 @@ pub fn selectNodes(
     graph: *const Graph,
     options: GraphQueryOptions,
 ) SelectionError!NodeSelection {
+    if (options.focus == null and options.focus_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
+    if (options.reachable_from == null and options.reachable_from_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
+    if (options.dependents_of == null and options.dependents_of_exclusions.len != 0) {
+        return error.ExclusionWithoutSelector;
+    }
     const universe = try collectUniverse(allocator, graph, options.include_external_dependencies);
     errdefer allocator.free(universe);
     const has_query = options.focus != null or
@@ -56,16 +69,31 @@ pub fn selectNodes(
             allocator,
             universe,
             focus.pattern,
+            options.focus_exclusions,
             focus.depth,
             &relationships.connected,
             selected,
         );
     }
     if (options.reachable_from) |pattern| {
-        try selectClosure(allocator, universe, pattern, &relationships.outgoing, selected);
+        try selectClosure(
+            allocator,
+            universe,
+            pattern,
+            options.reachable_from_exclusions,
+            &relationships.outgoing,
+            selected,
+        );
     }
     if (options.dependents_of) |pattern| {
-        try selectClosure(allocator, universe, pattern, &relationships.incoming, selected);
+        try selectClosure(
+            allocator,
+            universe,
+            pattern,
+            options.dependents_of_exclusions,
+            &relationships.incoming,
+            selected,
+        );
     }
 
     var labels: std.ArrayList([]const u8) = .empty;
@@ -153,13 +181,14 @@ fn selectDepthLimited(
     allocator: Allocator,
     labels: []const []const u8,
     pattern: query_options.Pattern,
+    exclusions: []const query_options.PatternExclusion,
     maximum_depth: usize,
     adjacency: *const Adjacency,
     selected: []bool,
 ) SelectionError!void {
     const DepthNode = struct { index: usize, depth: usize };
-    var matcher = try pattern.compile(allocator);
-    defer matcher.deinit();
+    var filter = try queryFilter(allocator, pattern, exclusions);
+    defer filter.deinit();
     var queue: std.ArrayList(DepthNode) = .empty;
     defer queue.deinit(allocator);
     const visited = try allocator.alloc(bool, labels.len);
@@ -167,7 +196,11 @@ fn selectDepthLimited(
     @memset(visited, false);
 
     for (labels, 0..) |label, index| {
-        if (!try matcher.isMatch(allocator, label)) continue;
+        const matched = filter.matches(allocator, .{ .path = label }) catch |failure| switch (failure) {
+            error.MissingDeclarationName => unreachable,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        if (!matched) continue;
         visited[index] = true;
         selected[index] = true;
         try queue.append(allocator, .{ .index = index, .depth = 0 });
@@ -189,11 +222,12 @@ fn selectClosure(
     allocator: Allocator,
     labels: []const []const u8,
     pattern: query_options.Pattern,
+    exclusions: []const query_options.PatternExclusion,
     adjacency: *const Adjacency,
     selected: []bool,
 ) SelectionError!void {
-    var matcher = try pattern.compile(allocator);
-    defer matcher.deinit();
+    var filter = try queryFilter(allocator, pattern, exclusions);
+    defer filter.deinit();
     var queue: std.ArrayList(usize) = .empty;
     defer queue.deinit(allocator);
     const visited = try allocator.alloc(bool, labels.len);
@@ -201,7 +235,11 @@ fn selectClosure(
     @memset(visited, false);
 
     for (labels, 0..) |label, index| {
-        if (!try matcher.isMatch(allocator, label)) continue;
+        const matched = filter.matches(allocator, .{ .path = label }) catch |failure| switch (failure) {
+            error.MissingDeclarationName => unreachable,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        if (!matched) continue;
         visited[index] = true;
         selected[index] = true;
         try queue.append(allocator, index);
@@ -215,6 +253,28 @@ fn selectClosure(
             try queue.append(allocator, neighbour);
         }
     }
+}
+
+fn queryFilter(
+    allocator: Allocator,
+    pattern: query_options.Pattern,
+    exclusions: []const query_options.PatternExclusion,
+) SelectionError!matching.Filter {
+    const mode: matching.MatchingMode = switch (pattern) {
+        .glob => .exact,
+        .regex => .partial,
+    };
+    var filter = try matching.Filter.init(allocator, pattern, .path, mode);
+    errdefer filter.deinit();
+    for (exclusions) |exclusion| {
+        if (exclusion.target == .declaration_name) return error.InvalidExclusionTarget;
+        const exclusion_mode: matching.MatchingMode = switch (exclusion.pattern) {
+            .glob => .exact,
+            .regex => .partial,
+        };
+        try filter.addExclusion(exclusion.pattern, exclusion.target, exclusion_mode);
+    }
+    return filter;
 }
 
 fn indexOf(labels: []const []const u8, sought: []const u8) ?usize {
@@ -293,6 +353,33 @@ test "focus performs depth-limited undirected traversal through a cycle" {
     });
     defer neighbours.deinit(std.testing.allocator);
     try expectLabels(neighbours, &.{ "src/a.zig", "src/b.zig", "src/c.zig" });
+}
+
+test "query exclusions filter seeds with mixed targets before traversal" {
+    var graph = try makeGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    const exclusions = [_]query_options.PatternExclusion{
+        .{ .pattern = .{ .regex = "^[bc]\\.zig$" }, .target = .filename },
+        .{ .pattern = .{ .glob = "src/d.zig" }, .target = .path },
+    };
+    var selection = try selectNodes(std.testing.allocator, &graph, .{
+        .focus = .{ .pattern = .{ .glob = "src/**" }, .depth = 0 },
+        .focus_exclusions = &exclusions,
+    });
+    defer selection.deinit(std.testing.allocator);
+    try expectLabels(selection, &.{"src/a.zig"});
+
+    const invalid = [_]query_options.PatternExclusion{.{
+        .pattern = .{ .glob = "Legacy" },
+        .target = .declaration_name,
+    }};
+    try std.testing.expectError(error.InvalidExclusionTarget, selectNodes(std.testing.allocator, &graph, .{
+        .focus = .{ .pattern = .{ .glob = "src/**" }, .depth = 0 },
+        .focus_exclusions = &invalid,
+    }));
+    try std.testing.expectError(error.ExclusionWithoutSelector, selectNodes(std.testing.allocator, &graph, .{
+        .reachable_from_exclusions = &exclusions,
+    }));
 }
 
 test "reachable and dependent queries follow their respective directions" {

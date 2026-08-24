@@ -17,9 +17,12 @@ pub const Candidate = struct {
 
 pub const MatchError = std.mem.Allocator.Error || error{MissingDeclarationName};
 
-/// An owned compiled pattern and the candidate field against which it runs.
+/// An owned compiled pattern, its candidate field, and any exclusions qualifying this pattern.
+/// Exclusions are alternatives: a positive match is rejected when any exclusion matches.
 pub const Filter = struct {
+    allocator: Allocator,
     matcher: regex_factory.RegexMatcher,
+    exclusions: std.ArrayList(Filter) = .empty,
 
     pub fn init(
         allocator: Allocator,
@@ -27,7 +30,7 @@ pub const Filter = struct {
         pattern_target_value: PatternTarget,
         matching_mode: MatchingMode,
     ) pattern_module.CompileError!Filter {
-        return .{ .matcher = .{
+        return .{ .allocator = allocator, .matcher = .{
             .regex = try pattern.compile(allocator),
             .target = pattern_target_value,
             .matching = matching_mode,
@@ -35,8 +38,50 @@ pub const Filter = struct {
     }
 
     pub fn deinit(self: *Filter) void {
+        for (self.exclusions.items) |*exclusion| exclusion.deinit();
+        self.exclusions.deinit(self.allocator);
         self.matcher.deinit();
         self.* = undefined;
+    }
+
+    pub fn clone(self: *const Filter, allocator: Allocator) pattern_module.CompileError!Filter {
+        var result = Filter{
+            .allocator = allocator,
+            .matcher = try regex_factory.RegexMatcher.compile(
+                allocator,
+                self.matcher.regex.source(),
+                self.target(),
+                self.matching(),
+            ),
+        };
+        errdefer result.deinit();
+        try result.exclusions.ensureTotalCapacity(allocator, self.exclusions.items.len);
+        for (self.exclusions.items) |*exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(allocator));
+        }
+        return result;
+    }
+
+    pub fn appendExclusionMove(self: *Filter, exclusion: *Filter) Allocator.Error!void {
+        try self.exclusions.append(self.allocator, exclusion.*);
+        exclusion.* = undefined;
+    }
+
+    pub fn addExclusion(
+        self: *Filter,
+        pattern: Pattern,
+        target_value: PatternTarget,
+        matching_mode: MatchingMode,
+    ) pattern_module.CompileError!void {
+        var exclusion = try Filter.init(self.allocator, pattern, target_value, matching_mode);
+        self.appendExclusionMove(&exclusion) catch |failure| {
+            exclusion.deinit();
+            return failure;
+        };
+    }
+
+    pub fn exclusionCount(self: *const Filter) usize {
+        return self.exclusions.items.len;
     }
 
     pub fn target(self: *const Filter) PatternTarget {
@@ -52,6 +97,15 @@ pub const Filter = struct {
         allocator: Allocator,
         candidate: Candidate,
     ) MatchError!bool {
+        if (!try self.matchesPositive(allocator, candidate)) return false;
+        return !try self.excludes(allocator, candidate);
+    }
+
+    pub fn matchesPositive(
+        self: *const Filter,
+        allocator: Allocator,
+        candidate: Candidate,
+    ) MatchError!bool {
         if (self.target() == .declaration_name) {
             const name = candidate.declaration_name orelse return error.MissingDeclarationName;
             return self.matcher.matches(allocator, name);
@@ -61,6 +115,21 @@ pub const Filter = struct {
         defer allocator.free(normalized);
         const selected = selectPathTarget(normalized, self.target());
         return self.matcher.matches(allocator, selected);
+    }
+
+    pub fn excludes(
+        self: *const Filter,
+        allocator: Allocator,
+        candidate: Candidate,
+    ) Allocator.Error!bool {
+        for (self.exclusions.items) |*exclusion| {
+            const excluded = exclusion.matches(allocator, candidate) catch |failure| switch (failure) {
+                error.MissingDeclarationName => false,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            if (excluded) return true;
+        }
+        return false;
     }
 };
 
@@ -228,9 +297,50 @@ test "patterns within selectors use OR and selector calls use AND" {
     ));
 }
 
+test "filter exclusions are OR alternatives applied after the positive match" {
+    var filter = try Filter.init(std.testing.allocator, .{ .glob = "src/**" }, .path, .exact);
+    defer filter.deinit();
+    try filter.addExclusion(.{ .glob = "src/**/generated/**" }, .path, .exact);
+    try filter.addExclusion(.{ .regex = "_generated\\.zig$" }, .filename, .partial);
+
+    try std.testing.expect(try filter.matches(
+        std.testing.allocator,
+        .{ .path = "src/domain/service.zig" },
+    ));
+    try std.testing.expect(!try filter.matches(
+        std.testing.allocator,
+        .{ .path = "src/domain/generated/deep/model.zig" },
+    ));
+    try std.testing.expect(!try filter.matches(
+        std.testing.allocator,
+        .{ .path = "src/domain/model_generated.zig" },
+    ));
+    try std.testing.expect(!try filter.matches(
+        std.testing.allocator,
+        .{ .path = "test/domain/service.zig" },
+    ));
+}
+
+test "filter clones own independent compiled exclusions" {
+    var filter = try Filter.init(std.testing.allocator, .{ .glob = "src/**" }, .path, .exact);
+    defer filter.deinit();
+    try filter.addExclusion(.{ .glob = "src/generated/**" }, .path, .exact);
+    var cloned = try filter.clone(std.testing.allocator);
+    defer cloned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), cloned.exclusionCount());
+    try std.testing.expect(!try cloned.matches(
+        std.testing.allocator,
+        .{ .path = "src/generated/file.zig" },
+    ));
+}
+
 fn exerciseAllocationFailures(allocator: Allocator) !void {
     var filter = try Filter.init(allocator, .{ .glob = "src/**/*.zig" }, .path, .partial);
     defer filter.deinit();
+    try filter.addExclusion(.{ .regex = "generated" }, .path, .partial);
+    var cloned = try filter.clone(allocator);
+    defer cloned.deinit();
     try std.testing.expect(try filter.matches(allocator, .{ .path = "src\\domain\\model.zig" }));
 }
 
