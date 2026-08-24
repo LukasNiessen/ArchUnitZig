@@ -78,23 +78,26 @@ pub const ProjectGraphBuilder = struct {
             };
         };
         errdefer result.deinit();
-        if (options.query.focus) |focus| result.focus = .{
-            .pattern = try OwnedPattern.init(allocator, focus.pattern),
-            .depth = focus.depth,
-        };
+        if (options.query.focus) |focus| {
+            const owned_pattern = try OwnedPattern.init(allocator, focus.pattern);
+            result.focus = .{ .pattern = owned_pattern, .depth = focus.depth };
+        }
         try result.focus_exclusions.initFrom(allocator, options.query.focus_exclusions);
         if (options.query.reachable_from) |pattern| {
-            result.reachable_from = try OwnedPattern.init(allocator, pattern);
+            const owned_pattern = try OwnedPattern.init(allocator, pattern);
+            result.reachable_from = owned_pattern;
         }
         try result.reachable_from_exclusions.initFrom(allocator, options.query.reachable_from_exclusions);
         if (options.query.dependents_of) |pattern| {
-            result.dependents_of = try OwnedPattern.init(allocator, pattern);
+            const owned_pattern = try OwnedPattern.init(allocator, pattern);
+            result.dependents_of = owned_pattern;
         }
         try result.dependents_of_exclusions.initFrom(allocator, options.query.dependents_of_exclusions);
         if (options.query.collapse) |collapse| {
             var validator = try collapse_module.Collapser.init(allocator, collapse);
             defer validator.deinit();
-            result.collapse = try OwnedCollapse.init(allocator, collapse);
+            const owned_collapse = try OwnedCollapse.init(allocator, collapse);
+            result.collapse = owned_collapse;
         }
         return result;
     }
