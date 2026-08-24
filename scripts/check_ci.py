@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 
 
 def require(source: str, value: str, errors: list[str]) -> None:
@@ -23,6 +24,7 @@ def require(source: str, value: str, errors: list[str]) -> None:
 
 def main() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
+    release_source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     errors: list[str] = []
 
     for value in (
@@ -60,8 +62,32 @@ def main() -> None:
     if "actions/cache" in source:
         errors.append("CI caches require a separately reviewed Zig/ZON-complete key")
 
+    for value in (
+        "tags:",
+        '- "v*.*.*"',
+        "contents: read",
+        "cancel-in-progress: false",
+        "fail-fast: false",
+        "ubuntu-latest",
+        "windows-latest",
+        "macos-latest",
+        "zig build test -Doptimize=Debug",
+        "zig build test -Doptimize=ReleaseSafe",
+        "zig build docs -Doptimize=ReleaseSafe",
+        "zig build benchmark-check",
+        "scripts/release.py smoke",
+        "contents: write",
+        "gh release create",
+        "gh release edit",
+    ):
+        require(release_source, value, errors)
+    if "continue-on-error" in release_source:
+        errors.append("release gates must not use continue-on-error")
+    if "actions/cache" in release_source:
+        errors.append("release workflow must not introduce an unreviewed cache")
+
     action_pattern = re.compile(r"^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?", re.MULTILINE)
-    actions = action_pattern.findall(source)
+    actions = action_pattern.findall(source + "\n" + release_source)
     if not actions:
         errors.append("CI workflow has no external action references")
     for reference, comment in actions:

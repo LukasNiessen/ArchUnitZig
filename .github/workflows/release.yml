@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: "0.16.0"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  compatibility:
+    name: Release candidate Debug · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Test release and toolchain verification
+        run: python -B -m unittest scripts.test_install_zig scripts.test_release
+
+      - name: Install checksum-pinned Zig
+        run: >-
+          python -B scripts/install_zig.py
+          --version "${{ env.ZIG_VERSION }}"
+          --destination "${{ runner.temp }}/zig-${{ env.ZIG_VERSION }}"
+
+      - name: Validate tag and release metadata
+        run: python -B scripts/release.py validate --tag "${{ github.ref_name }}"
+
+      - name: Run complete Debug test suite
+        run: zig build test -Doptimize=Debug
+
+  quality:
+    name: Release candidate ReleaseSafe, formatting, docs, and budgets · Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Test and validate release contracts
+        run: >-
+          python -B -m unittest scripts.test_install_zig scripts.test_release
+          && python -B scripts/check_ci.py
+          && python -B scripts/release.py validate --tag "${{ github.ref_name }}"
+
+      - name: Install checksum-pinned Zig
+        run: >-
+          python -B scripts/install_zig.py
+          --version "${{ env.ZIG_VERSION }}"
+          --destination "${{ runner.temp }}/zig-${{ env.ZIG_VERSION }}"
+
+      - name: Check Zig formatting
+        run: >-
+          zig fmt --check
+          build.zig build.zig.zon src benchmark
+          test/acceptance.zig test/dogfood.zig test/readme.zig test/readme
+
+      - name: Run complete ReleaseSafe test suite
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Build and validate ReleaseSafe documentation
+        run: zig build docs -Doptimize=ReleaseSafe
+
+      - name: Enforce hosted performance budgets
+        run: zig build benchmark-check
+
+  external-consumer:
+    name: Fresh external Zig package consumer · Linux
+    needs:
+      - compatibility
+      - quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install checksum-pinned Zig
+        run: >-
+          python -B scripts/install_zig.py
+          --version "${{ env.ZIG_VERSION }}"
+          --destination "${{ runner.temp }}/zig-${{ env.ZIG_VERSION }}"
+
+      - name: Fetch archive and run a real architecture test outside the repository
+        run: python -B scripts/release.py smoke --tag "${{ github.ref_name }}"
+
+  publish:
+    name: Publish immutable GitHub prerelease
+    if: github.repository == 'LukasNiessen/ArchUnitZig'
+    needs:
+      - external-consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out annotated tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require immutable releases and an annotated tag
+        shell: bash
+        run: |
+          test "$(gh api repos/${{ github.repository }}/immutable-releases --jq .enabled)" = "true"
+          test "$(git cat-file -t "${{ github.ref_name }}")" = "tag"
+
+      - name: Create reviewed draft with release metadata asset
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          "release/${{ github.ref_name }}.json#Zig package metadata and checksum"
+          --verify-tag
+          --draft
+          --prerelease
+          --title "ArchUnitZig ${{ github.ref_name }} preview"
+          --notes-file "release/${{ github.ref_name }}.md"
+
+      - name: Publish and lock release
+        run: gh release edit "${{ github.ref_name }}" --draft=false --prerelease

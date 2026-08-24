@@ -42,8 +42,8 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Test pinned toolchain installer
-        run: python -B -m unittest scripts.test_install_zig
+      - name: Test pinned toolchain and release verification
+        run: python -B -m unittest scripts.test_install_zig scripts.test_release
 
       - name: Install checksum-pinned Zig
         run: >-
@@ -70,11 +70,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Test pinned toolchain installer
-        run: python -B -m unittest scripts.test_install_zig
+      - name: Test pinned toolchain and release verification
+        run: python -B -m unittest scripts.test_install_zig scripts.test_release
 
       - name: Validate pinned CI contract
         run: python -B scripts/check_ci.py
+
+      - name: Validate release metadata and package contract
+        run: python -B scripts/release.py validate
 
       - name: Install checksum-pinned Zig
         run: >-
