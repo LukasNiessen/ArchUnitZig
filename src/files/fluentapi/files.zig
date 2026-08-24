@@ -2948,7 +2948,7 @@ test "have no cycles passes and fails against real Zig fixture projects" {
     try std.testing.expectEqual(@as(usize, 3), failing.items().len);
     for (failing.items()) |violation| try std.testing.expectEqual(assertion.Violation.Kind.cycle, violation.kind());
 
-    const formatCyclePath = @import("../../testing.zig").formatCyclePath;
+    const formatCyclePath = @import("../../testing.zig").formatCyclePath; // archunit: ignore ../../testing.zig
     const first_path = try formatCyclePath(std.testing.allocator, failing.items()[0].cycle.path);
     defer std.testing.allocator.free(first_path);
     try std.testing.expectEqualStrings("src/a.zig -> src/b.zig -> src/a.zig", first_path);

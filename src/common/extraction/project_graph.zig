@@ -191,6 +191,7 @@ fn extractLocatedGraph(
         for (parsed.references.items) |reference| {
             if (reference.kind == .embedded_file and !options.include_resources) continue;
             if (reference.kind == .c_header and !options.include_c_imports) continue;
+            if (reference.inside_test_declaration and !options.include_test_imports) continue;
 
             var classified_reference = try classify(
                 allocator,
@@ -342,4 +343,55 @@ test "multiple compilation units are assigned only at exact roots" {
 
     try std.testing.expectEqualStrings("app", compilationUnitFor("src/main.zig", overrides).?.id);
     try std.testing.expect(compilationUnitFor("src/helper.zig", overrides) == null);
+}
+
+test "production-only extraction excludes test imports but retains comptime imports" {
+    graph_cache.clearGraphCache();
+    defer graph_cache.clearGraphCache();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .name = .fixture, .version = \"0.0.0\", .fingerprint = 0x1111111111111111 }",
+    });
+    try tmp.dir.createDirPath(std.testing.io, "src");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "src/main.zig",
+        .data =
+        \\comptime { _ = @import("production.zig"); }
+        \\test "support" { _ = @import("test_support.zig"); }
+        ,
+    });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/production.zig", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/test_support.zig", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    var diagnostics = common_error.ErrorContext.init(std.testing.allocator);
+    defer diagnostics.deinit();
+
+    var complete = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{},
+        true,
+        &diagnostics,
+    );
+    defer complete.deinit(std.testing.allocator);
+    try std.testing.expect(complete.find("src/main.zig", "src/production.zig") != null);
+    try std.testing.expect(complete.find("src/main.zig", "src/test_support.zig") != null);
+
+    var production = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{ .include_test_imports = false },
+        true,
+        &diagnostics,
+    );
+    defer production.deinit(std.testing.allocator);
+    try std.testing.expect(production.find("src/main.zig", "src/production.zig") != null);
+    try std.testing.expect(production.find("src/main.zig", "src/test_support.zig") == null);
 }
