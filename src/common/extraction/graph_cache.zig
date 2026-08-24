@@ -357,6 +357,50 @@ test "canonical roots produce equal keys and every option separates keys" {
     }
 }
 
+test "cache keys encode root archignore path presence and exact content fingerprint" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var missing = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer missing.deinit(std.testing.allocator);
+    const joined_policy_path = try std.fs.path.join(std.testing.allocator, &.{ root, archignore.file_name });
+    defer std.testing.allocator.free(joined_policy_path);
+    const normalized_policy_path = try common_path.normalize(std.testing.allocator, joined_policy_path);
+    defer std.testing.allocator.free(normalized_policy_path);
+    try std.testing.expect(std.mem.indexOf(u8, missing.bytes, normalized_policy_path) != null);
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = archignore.file_name, .data = "" });
+    var empty = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer empty.deinit(std.testing.allocator);
+    try std.testing.expect(!missing.eql(empty));
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "# comment only\n",
+    });
+    var comment = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer comment.deinit(std.testing.allocator);
+    try std.testing.expect(!empty.eql(comment));
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "alpha/**\n",
+    });
+    var alpha = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer alpha.deinit(std.testing.allocator);
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "bravo/**\n",
+    });
+    var bravo = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, .{}, &context);
+    defer bravo.deinit(std.testing.allocator);
+    try std.testing.expect(!alpha.eql(bravo));
+}
+
 test "every compilation-unit and module mapping field separates cache keys" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

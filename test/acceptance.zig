@@ -4,6 +4,7 @@ const archunit = @import("archunit");
 const Allocator = std.mem.Allocator;
 const clean_root = "test/fixtures/acceptance projects/clean";
 const violating_root = "test/fixtures/acceptance projects/violating";
+const archignore_root = "test/fixtures/archignore";
 const analysis_exclusions = [_][]const u8{"testdata/**"};
 
 const app_modules = [_]archunit.ModuleOverride{
@@ -295,4 +296,41 @@ test "malformed source is an exact strict error and a permissive owned graph nod
         "testdata/malformed/broken.zig",
         "testdata/malformed/broken.zig",
     ) != null);
+}
+
+test "public enumeration and extraction honor the root archignore fixture" {
+    var diagnostics = archunit.ErrorContext.init(std.testing.allocator);
+    defer diagnostics.deinit();
+    var files = try archunit.enumerateSourceFiles(
+        std.testing.allocator,
+        std.testing.io,
+        archignore_root,
+        .{ .exclusions = &.{"testdata/**"} },
+        &diagnostics,
+    );
+    defer files.deinit(std.testing.allocator);
+    const expected = [_][]const u8{
+        "build.zig.zon",
+        "nested/hidden/kept.zig",
+        "nested/src/autogen/kept.zig",
+        "src/domain/model.zig",
+        "src/main.zig",
+    };
+    try std.testing.expectEqual(expected.len, files.items().len);
+    for (expected, files.items()) |wanted, actual| {
+        try std.testing.expectEqualStrings(wanted, actual);
+    }
+
+    var graph = try archunit.extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        ".",
+        archignore_root,
+        .{ .exclusions = &.{"testdata/**"} },
+        true,
+        &diagnostics,
+    );
+    defer graph.deinit(std.testing.allocator);
+    try std.testing.expect(graph.find("src/main.zig", "src/domain/model.zig") != null);
+    try std.testing.expect(graph.find("src/autogen/client.zig", "src/domain/model.zig") == null);
 }

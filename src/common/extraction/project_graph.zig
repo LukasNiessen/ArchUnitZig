@@ -347,6 +347,59 @@ test "project graph extracts real relative imports and returns independent cache
     try std.testing.expect(first.items()[0].source.ptr != second.items()[0].source.ptr);
 }
 
+test "editing root archignore invalidates cached extraction without an explicit clear" {
+    graph_cache.clearGraphCache();
+    defer graph_cache.clearGraphCache();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .name = .fixture, .version = \"0.0.0\", .fingerprint = 0x2222222222222222 }",
+    });
+    try tmp.dir.createDirPath(std.testing.io, "src");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "src/generated.zig",
+        .data = "const kept = @import(\"kept.zig\");\n",
+    });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/kept.zig", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "generated.zig\n",
+    });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(root);
+    var diagnostics = common_error.ErrorContext.init(std.testing.allocator);
+    defer diagnostics.deinit();
+
+    var ignored = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{},
+        false,
+        &diagnostics,
+    );
+    defer ignored.deinit(std.testing.allocator);
+    try std.testing.expect(ignored.find("src/generated.zig", "src/kept.zig") == null);
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "other.zig\n",
+    });
+    var included = try extractProjectGraph(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        ".",
+        .{},
+        false,
+        &diagnostics,
+    );
+    defer included.deinit(std.testing.allocator);
+    try std.testing.expect(included.find("src/generated.zig", "src/kept.zig") != null);
+}
+
 test "multiple compilation units are assigned only at exact roots" {
     const units = [_]module_resolver.CompilationUnitOverride{
         .{ .id = "app", .root_source_path = "src/main.zig" },

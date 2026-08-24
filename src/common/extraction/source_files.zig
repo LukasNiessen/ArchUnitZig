@@ -393,6 +393,70 @@ test "root-anchored and basename custom exclusions remain distinct" {
     try std.testing.expectEqual(@as(usize, 0), basename.items().len);
 }
 
+test "root archignore applies rooted basename directory and Windows-separator globs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "# ArchUnit glob syntax\n/root-only/\ngenerated\nsrc\\windows\\**\n",
+    });
+    try writeFixture(tmp.dir, "root-only/root.zig");
+    try writeFixture(tmp.dir, "nested/root-only/child.zig");
+    try writeFixture(tmp.dir, "nested/generated/client.zig");
+    try writeFixture(tmp.dir, "src/windows/deep/client.zig");
+    try writeFixture(tmp.dir, "src/keep.zig");
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var files = try enumerateSourceFiles(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        .{ .include_default_exclusions = false },
+        &context,
+    );
+    defer files.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), files.items().len);
+    try std.testing.expectEqualStrings("nested/root-only/child.zig", files.items()[0]);
+    try std.testing.expectEqualStrings("src/keep.zig", files.items()[1]);
+}
+
+test "root file explicit options and defaults compose while nested policies have no effect" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = archignore.file_name,
+        .data = "from-policy/**\n",
+    });
+    try writeFixture(tmp.dir, "from-policy/client.zig");
+    try writeFixture(tmp.dir, "from-options/client.zig");
+    try writeFixture(tmp.dir, "vendor/client.zig");
+    try writeFixture(tmp.dir, "nested/hidden/kept.zig");
+    try writeFixture(tmp.dir, "src/keep.zig");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "nested/.archignore",
+        .data = "/nested/hidden/**\n",
+    });
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var files = try enumerateSourceFiles(
+        std.testing.allocator,
+        std.testing.io,
+        root,
+        .{ .exclusions = &.{"from-options/**"} },
+        &context,
+    );
+    defer files.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), files.items().len);
+    try std.testing.expectEqualStrings("nested/hidden/kept.zig", files.items()[0]);
+    try std.testing.expectEqualStrings("src/keep.zig", files.items()[1]);
+}
+
 test "nested marked Zig projects are boundaries by default" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
