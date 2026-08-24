@@ -99,6 +99,23 @@ non-blank lines. File, declaration, and container measurements can also be consu
 `measure`, `summary`, and `analyze`. The precise AST and identity contract is recorded in
 [D038](docs/decisions.md#d038--structural-metrics-use-declaration-bound-container-identities).
 
+File scopes also expose directed dependency metrics:
+
+```zig
+var dependencies = try source.dependency();
+defer dependencies.deinit();
+var instability = try dependencies.instability();
+defer instability.deinit();
+var stability_rule = try instability.shouldBeBelowOrEqual(0.75);
+defer stability_rule.deinit(std.testing.allocator);
+```
+
+Available facts are afferent coupling, efferent coupling, instability, and coupling factor. The pure
+`calculateDependencyMetrics` API accepts any internal projected label universe and projected edges,
+so module and slice projections use the exact same math. Zig abstractness, main-sequence distance,
+and class-oriented zone rules are deliberately absent; [D039](docs/decisions.md#d039--dependency-metrics-count-distinct-projected-internal-neighbors)
+records the formulas and why visibility is not treated as abstractness.
+
 ## Development
 
 ArchUnitZig currently targets Zig 0.16.0.
