@@ -53,7 +53,7 @@ test "every README fence is synchronized with exercised documentation" {
     }
 
     try std.testing.expectEqualStrings(
-        "zig fetch --save=archunit git+https://github.com/LukasNiessen/ArchUnitZig.git#main",
+        "zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.1.tar.gz",
         try fencedBlock(allocator, readme, "install"),
     );
     var failure = try testing_example.renderedFailure();
