@@ -1,1 +1,3 @@
-pub const explicitly_excluded = true;
+const model = @import("../src/domain/model.zig");
+
+pub const ExplicitlyExcluded = model.Model;

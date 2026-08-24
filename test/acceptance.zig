@@ -334,3 +334,38 @@ test "public enumeration and extraction honor the root archignore fixture" {
     try std.testing.expect(graph.find("src/main.zig", "src/domain/model.zig") != null);
     try std.testing.expect(graph.find("src/autogen/client.zig", "src/domain/model.zig") == null);
 }
+
+test "CheckOptions exclusions add to archignore with a live negative control" {
+    var project = try archunit.files(std.testing.allocator, .{});
+    defer project.deinit();
+    var ignored_sources = try project.inPath(&.{
+        .{ .glob = "src/autogen/**" },
+        .{ .glob = "testdata/**" },
+    });
+    defer ignored_sources.deinit();
+    var negative = try ignored_sources.shouldNot();
+    defer negative.deinit();
+    var dependencies = try negative.dependOnFiles();
+    defer dependencies.deinit();
+    var rule = try dependencies.inPath(&.{.{ .glob = "src/domain/**" }});
+    defer rule.deinit(std.testing.allocator);
+
+    var file_only = archunit.CheckOptions.init(std.testing.allocator, std.testing.io);
+    file_only.working_directory = archignore_root;
+    file_only.clear_cache = true;
+    var control = try rule.check(file_only);
+    defer control.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), control.items().len);
+    try std.testing.expectEqualStrings(
+        "testdata/excluded_by_options.zig",
+        control.items()[0].file_dependency.items()[0].source_label,
+    );
+
+    var composed = file_only;
+    composed.clear_cache = false;
+    composed.allow_empty_tests = true;
+    composed.extraction.exclusions = &.{"testdata/**"};
+    var result = try rule.check(composed);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+}
