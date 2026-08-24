@@ -1,0 +1,45 @@
+<h1>Extraction and module resolution</h1>
+<p class="lead">ArchUnitZig validates Zig source with Zig's own AST parser, scans literal dependency builtins, resolves project paths, and normalizes the results into stable project-relative graph identifiers.</p>
+
+<h2 id="discovery">Project discovery and enumeration</h2>
+<p>Pass an explicit project directory or marker, or let discovery walk upward to the nearest <code>build.zig.zon</code> and then <code>build.zig</code>. Enumeration returns sorted lowercase <code>.zig</code> and <code>.zon</code> paths. Cache, VCS, output, dependency, and nested-project directories are excluded by default; custom exclusions are additive.</p>
+<p>Symlinks and Windows reparse points are not followed. This keeps traversal bounded and makes an external target's classification independent of filesystem aliases.</p>
+
+<h2 id="syntax">Dependency syntax</h2>
+<p>The extractor recognizes literal <code>@import</code>, <code>@embedFile</code>, and deprecated <code>@cImport</code>/<code>@cInclude</code> forms without evaluating code. Comments, ordinary string contents, and multiline strings cannot become false dependencies.</p>
+<div class="cards">
+  <article class="card"><h3>Strict parsing</h3><p>Malformed syntax, invalid literals, and non-literal operands return a technical parser failure with located context.</p></article>
+  <article class="card"><h3>Permissive parsing</h3><p>Broken files contribute owned syntax diagnostics and no partial dependency edges, allowing editor-style callers to continue.</p></article>
+</div>
+
+<h2 id="relative">Relative files and resources</h2>
+<p>Relative Zig, ZON, and embedded-resource paths resolve from the importing file. Resolution collapses <code>.</code> and <code>..</code>, checks the canonical project boundary, and distinguishes <code>resolved</code>, <code>missing</code>, and <code>outside_project</code>. A resolved resource stays project-owned while retaining its resource target class.</p>
+
+<h2 id="modules">Named modules need compilation-unit context</h2>
+<p>An import such as <code>@import("domain")</code> cannot be resolved correctly from its string alone. <code>build.zig</code> is an arbitrary program, and the same alias may point to a different module for each executable or test root. Configure explicit <code>CompilationUnitOverride</code> values with an optional root source and exact alias table.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Module result</th><th>Graph meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>resolved_project</code></td><td>The alias maps to a project-relative source root and becomes internal.</td></tr>
+      <tr><td><code>resolved_package</code></td><td>An explicitly package-origin mapping remains external, even if its checkout is inside the repository.</td></tr>
+      <tr><td><code>compiler_provided</code></td><td><code>std</code> and <code>builtin</code>; <code>root</code> resolves only from the selected unit.</td></tr>
+      <tr><td><code>unresolved</code></td><td>The raw alias stays visible as a stable external graph target.</td></tr>
+      <tr><td><code>missing</code> / <code>outside_project</code></td><td>The configured path is unavailable or crosses the project boundary.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="test-imports">Production graphs and colocated tests</h2>
+<p>Zig test declarations live beside production code, so their imports are visible by default. Set <code>ExtractionOptions.include_test_imports = false</code> when enforcing a production-only architecture. Ordinary <code>comptime</code> dependencies remain included.</p>
+
+<h2 id="cache">Deterministic cache identity</h2>
+<p>Graph-cache keys encode the canonical project root and every extraction option, including ordered compilation-unit mappings and test-import behavior. Caller-owned caches are unsynchronized; the optional process cache is mutex-protected. Reads return clones, so clearing a cache cannot invalidate a graph already returned to a caller.</p>
+
+<h2 id="ignores">Local dependency suppressions</h2>
+<p><code>// archunit: ignore</code> may suppress one intentional dependency occurrence. A trailing directive applies to calls on that line; a standalone directive applies only to the builtin on the next physical line. Optional target names are exact after Zig string decoding. Malformed directives are reported instead of silently changing the graph.</p>
+
+<div class="warning">
+  <strong>Automatic build-graph discovery is not implemented</strong>
+  The default resolver does not execute or partially interpret <code>build.zig</code>. Explicit compilation-unit mappings are the honest current contract; see <a href="{{root}}limitations/">limitations</a>.
+</div>

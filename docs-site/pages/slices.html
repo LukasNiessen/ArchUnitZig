@@ -1,0 +1,27 @@
+<h1>Slice architecture and diagrams</h1>
+<p class="lead">Slices project file paths into repeated architectural units—features, components, bounded contexts—then enforce independence or diagram adherence over the projected graph.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+{{source:test/readme/slices.zig}}
+
+<h2 id="projection">Project paths to slice names</h2>
+<p>Define a slice projection with a glob or regular expression capture. A path may map to one slice label or be dropped. Equal label pairs merge while retaining all raw file-edge evidence, and isolated projected nodes remain visible.</p>
+
+<h2 id="rules">Shipped slice rules</h2>
+<div class="cards">
+  <article class="card"><h3>No cycles</h3><p>Detect directed cycles among slice nodes and return a canonical closed slice path with the contributing file edges.</p></article>
+  <article class="card"><h3>Independence</h3><p>Require slices not to depend on one another, with configurable allowances for explicitly shared slices.</p></article>
+  <article class="card"><h3>Diagram adherence</h3><p>Compare actual projected dependencies with a supported PlantUML component diagram and report missing or forbidden relationships.</p></article>
+  <article class="card"><h3>Diagram export</h3><p>Render the owned slice graph as deterministic PlantUML without a network service or remote renderer.</p></article>
+</div>
+
+<h2 id="plantuml">PlantUML contract</h2>
+<p>The parser intentionally supports the component vocabulary the rule can verify. Aliases and directed component relationships become slice names and allowed edges. Unsupported syntax is a clear parse/configuration error rather than being guessed.</p>
+
+<h2 id="exclusions">Exclusions happen before projection</h2>
+<p>Path exclusions remove project paths before labels and edges are projected. An external module has no project path and is not a slice node. This keeps a slice rule about the internal project topology instead of mixing dependency classification into capture semantics.</p>
+
+<div class="decision">
+  <strong>Use layers and slices for different shapes</strong>
+  Layers name a small, ordered architecture hierarchy. Slices describe many repeated peer units with names captured from paths. A project can enforce both views over the same dependency graph.
+</div>

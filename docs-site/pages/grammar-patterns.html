@@ -1,0 +1,44 @@
+<h1>Grammar, patterns, and ownership</h1>
+<p class="lead">The fluent API is intentionally small and directional. Read a chain from project scope to subject, mood, predicate, optional dependency object, and terminal.</p>
+
+<h2 id="pipeline">The pipeline</h2>
+<pre class="pipeline"><code>project → subject selector → should / shouldNot → predicate → dependency selector → check
+
+files(...).inPath(...).should().dependOnFiles().inPath(...).check(...)</code></pre>
+<p>Selectors are available before the mood. Predicate choices are available after it. The types make invalid word orders unrepresentable instead of reporting them late.</p>
+
+<h2 id="patterns">Glob and regular-expression patterns</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Pattern</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>*</code></td><td>Zero or more characters inside one path segment.</td></tr>
+      <tr><td><code>**</code></td><td>Zero or more characters across path separators.</td></tr>
+      <tr><td><code>?</code></td><td>Exactly one Unicode scalar.</td></tr>
+      <tr><td><code>[abc]</code></td><td>One scalar in a character class.</td></tr>
+      <tr><td><code>.regex("...")</code></td><td>An explicit regex escape hatch; regex matching is partial unless anchors say otherwise.</td></tr>
+    </tbody>
+  </table>
+</div>
+<p>Glob matches are anchored to the entire candidate. Candidate and pattern separators normalize to <code>/</code>, while matching remains case-sensitive. A selector call with several patterns means OR; repeated selector calls mean AND.</p>
+
+<h2 id="targets">Match targets</h2>
+<p><code>withName</code> matches a filename, <code>inFolder</code> matches the path without its filename, <code>inPath</code> matches the full normalized project path, and <code>inFile</code> chooses exact paths. Metrics also expose Zig declaration and container identity.</p>
+
+<h2 id="exclusions">Qualify with exclusions</h2>
+<p><code>except</code> qualifies the selector immediately before it and inherits that selector's target. <code>exceptTargeted</code> names another valid target explicitly. The resulting clause is one expression:</p>
+<pre><code>(positive A OR positive B) AND NOT (exclusion X OR exclusion Y)</code></pre>
+<p>Exclusions happen before layer ownership, slice projection, and graph-query traversal. A graph query removes excluded seeds but may still reach the same node from an included seed. Calling an exclusion without a preceding selector is a stable user error.</p>
+
+<h2 id="empty-tests">Empty subjects fail deliberately</h2>
+<p>If the subject selector matches nothing, the rule returns <code>EmptyTestViolation</code>. This prevents a renamed folder from silently disabling a boundary. Set <code>CheckOptions.allow_empty_tests</code> only when an empty scope is an intentional policy state.</p>
+
+<h2 id="ownership">Own, clone, release</h2>
+<p>Every builder stage owns its allocator-backed filters and context. Assignment does not create another owner. Use <code>clone</code> before branching a chain, and call the documented <code>deinit</code> for every value. Returned graphs, snapshots, and violation lists also own their data.</p>
+<div class="decision">
+  <strong>Why this ceremony exists</strong>
+  The API does not hide a process allocator or bind the whole fluent chain to a long-lived arena. Lifetimes remain explicit and leak checks remain meaningful in <code>zig test</code>.
+</div>
+
+<h2 id="terminals">Execution terminals</h2>
+<p><code>check</code> returns an owned <code>ViolationList</code>. <code>expectPasses</code> and <code>assertPasses</code> turn it into Zig test behavior. Graph and metrics builders also expose owned analysis values, renderers, and filesystem exporters. Constructing the preceding stages never reads the project.</p>

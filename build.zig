@@ -105,7 +105,46 @@ pub fn build(b: *std.Build) void {
         .check = true,
     });
 
+    const docs_library = b.addLibrary(.{
+        .name = "archunit-docs",
+        .linkage = .static,
+        .root_module = archunit,
+    });
+    docs_library.step.dependOn(&run_readme_tests.step);
+
+    const build_docs = b.addSystemCommand(&.{
+        "python",
+        "scripts/build_docs.py",
+        "--root",
+    });
+    build_docs.addDirectoryArg(b.path("."));
+    build_docs.addArg("--output");
+    const docs_output = build_docs.addOutputDirectoryArg("documentation-site");
+    build_docs.addArg("--api-docs");
+    build_docs.addDirectoryArg(docs_library.getEmittedDocs());
+
+    const check_docs = b.addSystemCommand(&.{
+        "python",
+        "scripts/check_docs.py",
+        "--root",
+    });
+    check_docs.addDirectoryArg(b.path("."));
+    check_docs.addArg("--site");
+    check_docs.addDirectoryArg(docs_output);
+    check_docs.step.dependOn(&build_docs.step);
+
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docs_output,
+        .install_dir = .prefix,
+        .install_subdir = "docs-site",
+    });
+    install_docs.step.dependOn(&check_docs.step);
+
+    const docs_step = b.step("docs", "Build and validate the documentation site");
+    docs_step.dependOn(&format_check.step);
+    docs_step.dependOn(&install_docs.step);
+
     const test_step = b.step("test", "Run formatting checks and tests");
     test_step.dependOn(&format_check.step);
-    test_step.dependOn(&run_readme_tests.step);
+    test_step.dependOn(&install_docs.step);
 }

@@ -1,0 +1,41 @@
+<h1>File architecture rules</h1>
+<p class="lead">File rules are the general-purpose policy surface: choose project files, select a mood, and assert names, locations, dependencies, cycles, or a Zig callback.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+<p>The canonical example below covers an internal dependency allowlist and an approved external-module set through the public package facade.</p>
+{{source:test/readme/files.zig}}
+
+<h2 id="subjects">Select subject files</h2>
+<p>Start with <code>archunit.files</code> or <code>archunit.projectFiles</code>. Narrow the owned scope using <code>withName</code>, <code>inFolder</code>, <code>inPath</code>, and exact <code>inFile</code> selectors. Pattern alternatives inside one call are OR; separate calls compose as AND. Add <code>except</code> immediately after a selector to keep generated or exceptional paths outside the subject.</p>
+
+<h2 id="predicates">Shipped predicates</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Predicate</th><th>Use it for</th></tr></thead>
+    <tbody>
+      <tr><td><code>haveName</code></td><td>Filename conventions.</td></tr>
+      <tr><td><code>beInFolder</code> / <code>beInPath</code></td><td>Location and ownership conventions.</td></tr>
+      <tr><td><code>dependOnFiles</code></td><td>Internal dependency requirements or prohibitions.</td></tr>
+      <tr><td><code>dependOnExternalModules</code></td><td>Package, compiler-module, C-header, or resource policy.</td></tr>
+      <tr><td><code>haveNoCycles</code></td><td>Deterministic directed-cycle detection over the selected graph.</td></tr>
+      <tr><td><code>adhereTo</code></td><td>A caller-defined Zig predicate with structured custom violations.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="dependencies">Dependency objects use the same grammar</h2>
+<p>After <code>dependOnFiles</code>, select the dependency object with the same filename, folder, path, exact-file, and exclusion vocabulary. Internal self-edges retain isolated nodes but do not count as real dependencies. A violation owns the source, target, import kinds, and source locations.</p>
+
+<h2 id="external">External dependency scope</h2>
+<p>Named packages are selected by default. Opt into compiler modules, C headers, or resources when the policy needs them. Resolved project aliases are internal; explicitly package-origin aliases and unresolved aliases remain external. Negated rules use the same classified facts.</p>
+
+<h2 id="cycles">Cycle results</h2>
+<p>Cycle detection works over selected internal paths and returns canonical closed paths, so the first node also appears at the end. Ordering is deterministic, and structured results keep edge evidence rather than reducing a cycle to prose.</p>
+
+<h2 id="custom">Custom policy callbacks</h2>
+<p><code>adhereTo</code> receives borrowed file information and a caller-provided type-erased context. It may return a policy result or propagate a callback error. Custom violations own their description and affected path, so formatting remains stable after callback state is gone.</p>
+
+<div class="decision">
+  <strong>Prefer a structural rule when one fits</strong>
+  Built-in predicates preserve richer dependency evidence and can evolve with the shared diagnostics contract. Use callbacks for genuinely project-specific semantics.
+</div>

@@ -1,0 +1,38 @@
+<h1>Query and export dependency graphs</h1>
+<p class="lead">Graph reports expose an owned, stable snapshot for automation and a renderer for human-readable offline artifacts. Querying and presentation remain separate operations.</p>
+
+<h2 id="complete-example">A compiled example</h2>
+{{source:test/readme/graph.zig}}
+
+<h2 id="snapshot">Create an owned snapshot</h2>
+<p><code>projectGraph</code> locates and extracts a project at its terminal. The result owns sorted nodes, edges, import-kind evidence, and a structural summary. Consumers can clone or inspect it without parsing a rendered document.</p>
+
+<h2 id="queries">Focus, closure, and collapse</h2>
+<p>Start from filename, folder, path, or exact-file seeds. Focus-depth queries retain a bounded neighborhood; incoming and outgoing closure queries follow one dependency direction. Pattern exclusions remove seeds before traversal but do not hide nodes reached from an included seed.</p>
+<p>Collapse rules group matching paths under an explicit label after selection. This makes a report legible without changing the extracted dependency graph or the evidence kept on a rendered edge.</p>
+
+<h2 id="formats">Six local formats</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Format</th><th>Primary use</th></tr></thead>
+    <tbody>
+      <tr><td>JSON</td><td>Automation and stable structured interchange.</td></tr>
+      <tr><td>Graphviz DOT</td><td>General graph tooling and rendered images.</td></tr>
+      <tr><td>PlantUML</td><td>Documentation repositories that already use PlantUML.</td></tr>
+      <tr><td>Mermaid</td><td>Markdown-oriented documentation surfaces.</td></tr>
+      <tr><td>Dependency Cruiser JSON</td><td>Interop with dependency visualization tooling.</td></tr>
+      <tr><td>HTML</td><td>A complete offline interactive report with embedded assets.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="render-export">Render or export</h2>
+<p>Rendering returns owned bytes and performs no filesystem writes. Export validates the requested filename, supplies the conventional extension when it is absent, creates parent directories, and propagates I/O failures. HTML output has no remote asset dependency.</p>
+
+<h2 id="determinism">Deterministic evidence</h2>
+<p>Nodes, edges, classification sets, and source locations are normalized and sorted before rendering. Optional generation timestamps can be disabled for golden files. Query operations clone their result so source snapshots and caller contexts may be released independently.</p>
+
+<div class="callout">
+  <strong>Reports explain; rules enforce</strong>
+  Keep release policy in file, layer, slice, or metric rules. Use graph reports to explore a boundary, review a change, and attach concrete topology evidence.
+</div>

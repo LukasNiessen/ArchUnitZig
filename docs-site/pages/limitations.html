@@ -1,0 +1,28 @@
+<h1>Current limitations and honest boundaries</h1>
+<p class="lead">ArchUnitZig prefers explicit missing behavior over apparent parity built on Zig concepts that do not exist or cannot be discovered reliably without running user code.</p>
+
+<h2 id="build-graph">No automatic <code>build.zig</code> interpretation</h2>
+<p>Named module imports need a compilation-unit alias table. Zig build files are programs: their module graph can depend on target, options, environment, filesystem state, and control flow. ArchUnitZig does not run them or recognize a misleading subset. Provide <code>CompilationUnitOverride</code> values explicitly.</p>
+
+<h2 id="dynamic-imports">Literal dependency calls only</h2>
+<p>The extractor records literal <code>@import</code>, <code>@embedFile</code>, and supported C-import forms. A computed dependency operand is a parser-policy error in strict mode because static analysis cannot name its target without execution.</p>
+
+<h2 id="filesystem">Traversal is deliberately conservative</h2>
+<p>Symlinks and Windows reparse points are not followed. Nested marked Zig projects are traversal boundaries by default. Existing relative targets are canonicalized against the project root, and paths leaving that root remain external/outside rather than being silently folded into the project graph.</p>
+
+<h2 id="language-metrics">No class-oriented metrics</h2>
+<p>There is no class/interface rule surface, inheritance policy, LCOM, abstractness, distance-from-main-sequence, or zone label. Zig declarations, containers, source structure, imports, graph coupling, and user-defined metrics are the supported vocabulary.</p>
+
+<h2 id="slice-vocabulary">Slice support follows Zig paths</h2>
+<p>Slices are projected from normalized file paths and dependency edges. Sibling-library conventions that depend on runtime namespaces, class packages, or language-specific annotations are not copied when they have no Zig representation.</p>
+
+<h2 id="parser-version">The parser follows Zig 0.16</h2>
+<p>ArchUnitZig's syntax behavior, standard-library APIs, and package wiring target Zig 0.16.0. A future Zig upgrade is a reviewed compatibility undertaking, not an implied floating guarantee.</p>
+
+<h2 id="api-docs">Compiler API docs complement this guide</h2>
+<p>Zig's generated <a href="{{root}}api/">API reference</a> exposes the public facade but is not a substitute for ownership rules and domain semantics. This guide uses compiled source examples; consult both surfaces when writing a new rule.</p>
+
+<div class="callout">
+  <strong>Found a boundary that should move?</strong>
+  Open a focused <a href="https://github.com/LukasNiessen/ArchUnitZig/issues">GitHub issue</a> with a Zig fixture and the expected structured result. A concrete language example is more useful than parity stated only in sibling terminology.
+</div>
