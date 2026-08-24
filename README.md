@@ -332,6 +332,26 @@ sources are additive: the file cannot re-include a built-in cache/vendor/output 
 excluded explicitly through `CheckOptions`. The cache identity includes the normalized root-file
 path, its presence, and a SHA-256 fingerprint of its exact bytes, so edits invalidate cached graphs.
 
+### Zig workspaces and nested packages
+
+`ExtractionOptions.workspace.mode` selects one of three scopes: the located package (the compatible
+default), an explicit borrowed list of `WorkspacePackage` values, or every `build.zig.zon` package
+discovered below the located repository root. Explicit packages provide an `id` and root-relative
+`path`. Discovered ids are their normalized manifest-directory paths, with `.` naming a root
+package. Cache, VCS, output, documentation, dependency, symlink, and reparse-point trees are never
+entered during discovery.
+
+Workspace graph identifiers are `package_id::package-relative/path`, so `api::src/main.zig` and
+`worker::src/main.zig` cannot collapse. The single-package mode retains ordinary `src/main.zig`
+identifiers. Workspace `CompilationUnitOverride` values set `package_id`; a project-origin module
+mapping without its own `package_id` resolves inside that unit's package, while an explicit target
+package models a local cross-package alias. `root` always resolves in the selected unit's package.
+
+The workspace-root `.archignore` matches physical repository-relative paths, each selected package's
+own `.archignore` matches package-relative paths, and `ExtractionOptions.exclusions` matches qualified
+workspace identifiers. All are additive. Workspace cache keys include the selected mode/list and the
+resolved package identities, canonical paths, manifest fingerprints, and ignore fingerprints.
+
 ## Limitations
 
 | Area | Current contract |
@@ -350,9 +370,10 @@ path, its presence, and a SHA-256 fingerprint of its exact bytes, so edits inval
 ## Configuration and diagnostics
 
 `CheckOptions` carries the allocator, `std.Io`, working directory, empty-test policy, cache control,
-logging, and one `ExtractionOptions` value. Extraction options cover exclusions, strictness,
-resource/C-header inclusion, test-import inclusion, compilation-unit mappings, and the currently
-explicit-only build-graph mode. Every field that changes a graph participates in its cache key.
+logging, and one `ExtractionOptions` value. Extraction options cover exclusions, workspace scope,
+strictness, resource/C-header inclusion, test-import inclusion, compilation-unit mappings, and the
+currently explicit-only build-graph mode. Every field that changes a graph participates in its
+cache key.
 
 Logging is disabled by default. A check can borrow an ordinary writer, structured `LogSink`, and/or
 file sink with explicit output directory and prefix. Levels are `debug`, `info`, `warn`, and

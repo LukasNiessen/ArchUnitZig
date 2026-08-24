@@ -2,7 +2,7 @@
 <p class="lead">ArchUnitZig prefers explicit missing behavior over apparent parity built on Zig concepts that do not exist or cannot be discovered reliably without running user code.</p>
 
 <h2 id="build-graph">No automatic <code>build.zig</code> interpretation</h2>
-<p>Named module imports need a compilation-unit alias table. Zig build files are programs: their module graph can depend on target, options, environment, filesystem state, and control flow. ArchUnitZig does not run them or recognize a misleading subset. Provide <code>CompilationUnitOverride</code> values explicitly.</p>
+<p>Named module imports need a compilation-unit alias table. Zig build files are programs: their module graph can depend on target, options, environment, filesystem state, and control flow. ArchUnitZig does not run them or recognize a misleading subset. Workspace discovery finds package boundaries from manifests; it does not infer compilation roots or aliases. Provide <code>CompilationUnitOverride</code> values explicitly.</p>
 
 <h2 id="dynamic-imports">Literal dependency calls only</h2>
 <p>The extractor records literal <code>@import</code>, <code>@embedFile</code>, and supported C-import forms. A computed dependency operand is a parser-policy error in strict mode because static analysis cannot name its target without execution.</p>

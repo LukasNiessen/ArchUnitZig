@@ -9,6 +9,10 @@
 <p>An optional <code>.archignore</code> beside the located root marker applies to direct enumeration and every fluent architecture check. It uses ArchUnitZig globs: <code>*</code> stays in one segment, <code>**</code> crosses segments, a leading <code>/</code> anchors at the root, separator-free patterns match basenames at any depth, and Windows separators are accepted. Blank lines and full-line <code>#</code> comments are ignored.</p>
 <p>Only the root file is authoritative. Nested files do not override it, and its patterns are additive with explicit and built-in exclusions. Gitignore negation is intentionally unsupported; a line beginning with <code>!</code> is an <code>InvalidPattern</code> error rather than an inert policy.</p>
 
+<h2 id="workspaces">Workspaces and nested packages</h2>
+<p>The compatible default analyzes only the located package. Workspace mode can instead select an explicit list of package ids and root-relative paths, or discover every <code>build.zig.zon</code> below a repository root. Discovery prunes dependency, vendor, cache, VCS, output, documentation, symlink, and reparse-point trees.</p>
+<p>Workspace identifiers are <code>package_id::package-relative/path</code>. Discovered ids are manifest-directory paths (<code>.</code> for the root); explicit ids are caller supplied. Compilation units name their package, <code>root</code> stays in that package, and project-origin aliases may deliberately target another selected package. The workspace root ignore file matches physical repository paths, package ignore files match package-relative paths, and explicit exclusions match qualified identifiers.</p>
+
 <h2 id="syntax">Dependency syntax</h2>
 <p>The extractor recognizes literal <code>@import</code>, <code>@embedFile</code>, and deprecated <code>@cImport</code>/<code>@cInclude</code> forms without evaluating code. Comments, ordinary string contents, and multiline strings cannot become false dependencies.</p>
 <div class="cards">
@@ -38,7 +42,7 @@
 <p>Zig test declarations live beside production code, so their imports are visible by default. Set <code>ExtractionOptions.include_test_imports = false</code> when enforcing a production-only architecture. Ordinary <code>comptime</code> dependencies remain included.</p>
 
 <h2 id="cache">Deterministic cache identity</h2>
-<p>Graph-cache keys encode the canonical project root and every extraction option, including ordered compilation-unit mappings and test-import behavior. They also encode the normalized root <code>.archignore</code> path, presence, and exact-content SHA-256 fingerprint, so edits invalidate prior results. Caller-owned caches are unsynchronized; the optional process cache is mutex-protected. Reads return clones, so clearing a cache cannot invalidate a graph already returned to a caller.</p>
+<p>Graph-cache keys encode the canonical project root and every extraction option, including workspace selection, ordered compilation-unit mappings, and test-import behavior. They also encode root/package ignore fingerprints plus every selected manifest's canonical path and exact-content fingerprint, so edits or newly discovered packages invalidate prior results. Caller-owned caches are unsynchronized; the optional process cache is mutex-protected. Reads return clones, so clearing a cache cannot invalidate a graph already returned to a caller.</p>
 
 <h2 id="ignores">Local dependency suppressions</h2>
 <p><code>// archunit: ignore</code> may suppress one intentional dependency occurrence. A trailing directive applies to calls on that line; a standalone directive applies only to the builtin on the next physical line. Optional target names are exact after Zig string decoding. Malformed directives are reported instead of silently changing the graph.</p>

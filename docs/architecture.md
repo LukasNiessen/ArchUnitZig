@@ -208,13 +208,19 @@ blank lines and full-line `#` comments are metadata; negation is deliberately un
 nested `.archignore` files do not alter the root policy.
 
 Extraction settings live in one `ExtractionOptions` value: exclusions, parser strictness,
-resource/C-header toggles, explicit compilation-unit mappings, and build-graph mode. Graph-cache
-keys use the canonical project root plus a length-delimited encoding of every field. They also encode
-the normalized root `.archignore` path, whether the file exists, and the SHA-256 fingerprint of its
-exact bytes. A schema test reflects over the options and nested module-mapping structs, so adding a
-field without acknowledging it in key construction fails the suite. Slice order is significant;
-this may conservatively miss an equivalent hit but cannot return a graph produced for different
-input.
+resource/C-header toggles, workspace scope, explicit compilation-unit mappings, and build-graph
+mode. Single-package scope retains package-relative identifiers. Explicit and discovered workspace
+scopes qualify every internal identifier as `package_id::package-relative/path`; discovered package
+ids are normalized manifest-directory paths and explicit ids are caller-owned labels. Nested
+manifests are package boundaries even while discovery continues below them to find deeper packages.
+
+Graph-cache keys use the canonical project root plus a length-delimited encoding of every field.
+They also encode the normalized root `.archignore` path, whether the file exists, and the SHA-256
+fingerprint of its exact bytes. Workspace keys additionally encode every resolved package's identity,
+canonical/relative paths, exact manifest fingerprint, and package-ignore fingerprint. A schema test
+reflects over options, workspace selections, and nested module-mapping structs, so adding a field
+without acknowledging it in key construction fails the suite. Slice order is significant; this may
+conservatively miss an equivalent hit but cannot return a graph produced for different input.
 
 `GraphCache` instances own cloned keys and graphs and are deliberately not synchronized. Reads also
 return clones, so clearing or destroying a cache never invalidates a caller's graph. The process-wide
