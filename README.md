@@ -11,6 +11,34 @@ The public API is not ready yet. The implementation is tracked in the
 [ordered roadmap](docs/roadmap.md), while [architecture](docs/architecture.md) and
 [Zig-specific decisions](docs/decisions.md) explain how and why this port differs from its siblings.
 
+## Pattern exclusions
+
+Every selector can exclude generated or otherwise exceptional subjects without duplicating the
+surrounding rule. `except` inherits the target of the immediately preceding selector;
+`exceptTargeted` can instead inspect a filename, folder, full path, or declaration/container name:
+
+```zig
+var project = try archunit.files(std.testing.allocator, .{});
+defer project.deinit();
+var source = try project.inPath(&.{.{ .glob = "src/**/*.zig" }});
+defer source.deinit();
+var handwritten = try source.except(&.{.{ .glob = "src/**/generated/**" }});
+defer handwritten.deinit();
+var public_sources = try handwritten.exceptTargeted(
+    &.{.{ .regex = "^internal_" }},
+    .filename,
+);
+defer public_sources.deinit();
+```
+
+Alternatives inside a selector remain OR, while its exclusions are OR-ed together and negated:
+`(positive A OR positive B) AND NOT (excluded X OR excluded Y)`. The qualifier applies only to the
+selector immediately before it; calling either exclusion method before a selector is an error.
+The same vocabulary is available for subject and dependency-object file selectors, external
+modules, layers, slices, metrics, and graph-query seeds. Slice exclusions run before path-to-slice
+projection, and graph exclusions remove seeds before traversal. See
+[D043](docs/decisions.md#d043--exclusions-are-owned-qualifiers-on-one-selector).
+
 ## Slice example
 
 The pre-release slice API turns one captured path segment into a component and checks direct

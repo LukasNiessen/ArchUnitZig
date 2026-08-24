@@ -986,3 +986,34 @@ Consequence: automation can consume the same owned summary verified by tests, hu
 drift from the displayed data, unsupported object-oriented concepts stay visibly absent, offline
 reports are portable, and deterministic builds remain possible without weakening the default human
 timestamp.
+
+### D043 — Exclusions are owned qualifiers on one selector
+
+Pattern exclusions are part of the shared compiled `Filter`, not independent filtering features in
+each fluent domain. One selector means `(positive A OR positive B) AND NOT (exclusion X OR
+exclusion Y)`. Repeated selectors remain AND clauses. `except(patterns)` inherits the immediately
+preceding selector's target, while `exceptTargeted(patterns, target)` chooses filename, folder, full
+path, or declaration/container name explicitly. Both calls clone the builder and all pattern text;
+callers may release their inputs after construction. Repeating an exclusion call adds alternatives
+to the same negative qualifier. Calling one without a selector returns
+`ExclusionWithoutSelector`, and choosing declaration identity where candidates have only paths
+returns `InvalidExclusionTarget`.
+
+The common filter separates positive matching from exclusion testing so qualified Zig declaration
+identities can test both their simple and fully qualified names without allowing a negative match to
+be bypassed by the other representation. Missing declaration identity never counts as an exclusion.
+Scope evidence marks exclusions explicitly; rule descriptions use `except`, and empty-test
+diagnostics render the structural `EXCEPT` relationship rather than losing the qualifier.
+
+File subject selectors, dependency-object selectors, external-module selectors, layer definitions,
+slice projections, metric scopes, and graph queries all use this contract. Layers exclude before
+ordered layer ownership. Slices exclude normalized internal paths before labels and edges are
+projected; an external target has no project path to filter. Graph queries remove matching seeds
+before focus-depth or directional closure traversal, but they do not hide nodes reached from an
+included seed. Replacing a slice projection or starting a different graph-query clause ends the
+immediate selector context, so a later orphaned exclusion is rejected.
+
+Consequence: “everything under `src/`, except generated code” stays one diagnosable clause across
+all public APIs, glob and regex behavior remains centralized, fluent builders retain independent
+owned value semantics, and traversal/projection semantics do not accidentally turn exclusions into
+post-processing that erases valid evidence.
