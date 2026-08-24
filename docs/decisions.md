@@ -1058,3 +1058,37 @@ HTML events use the resolved filename including an automatically appended extens
 Consequence: tests can capture logs without corrupting Zig's test-runner protocol, applications can
 integrate structured records without global hooks, parallel architecture checks cannot accidentally
 reconfigure one another, and diagnostics remain explicit about both I/O lifetime and failure.
+
+### D045 — Acceptance separates build reachability from the analysis corpus
+
+The release-quality acceptance suite is a separate Zig test root which imports only the public
+`archunit` module. Its clean and deliberately violating packages live below a parent directory with
+a space and are analyzed using `.` plus an explicit `CheckOptions.working_directory`. This verifies
+the same facade, locator, ownership, and error boundaries used by an external consumer rather than
+giving acceptance tests privileged access to internal modules.
+
+Each package has app, application, domain, infrastructure, and integration compilation roots. Build
+module aliases are mirrored by explicit `CompilationUnitOverride` values; a source-controlled vendor
+module is marked as package-origin and remains external. There are no fixture dependency URLs.
+Together the roots cover `std`, `builtin`, `root`, project and package aliases, `.zig` and `.zon`
+files, resources, C headers, and imports inside test and comptime blocks.
+
+Malformed syntax cannot belong to a passing compiler root, and an imported cycle cannot produce a
+passing Zig build. Those files therefore remain in the analysis corpus but outside every reachable
+build root. Normal architecture rules exclude the `testdata` malformed subtree; a dedicated test
+removes that exclusion and asserts both the exact strict parser diagnostic and the permissive owned
+graph node. The violating twin's valid but unreachable cycle remains included in normal analysis.
+This is an explicit distinction between “the fixture package builds” and “every file in the
+architecture corpus is compiler-reachable,” not a hidden waiver.
+
+The top-level test step runs the library suite, clean fixture build, violating fixture build, and
+external acceptance suite in that order. Nested fixture builds receive one repository-local global
+cache through both the Zig command-line option and `ZIG_GLOBAL_CACHE_DIR`; deprecated `@cImport`
+work consults the latter even when the parent build has the former. Exact structured layer/cycle/
+slice facts and a complete plain-text result golden prevent a readable-but-wrong presentation from
+passing. Fixture format checks deliberately omit only the malformed proof file.
+
+Consequence: release gates exercise realistic Zig-specific dependency forms without network or
+developer-cache state, intentional invalid inputs remain testable without making fixture builds
+meaningless, and the public facade is proven against both a clean architecture and its minimal
+violating twin.

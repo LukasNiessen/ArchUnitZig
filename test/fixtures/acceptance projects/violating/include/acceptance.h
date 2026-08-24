@@ -1,0 +1,1 @@
+#define ACCEPTANCE_VALUE 7

@@ -1,0 +1,7 @@
+.{
+    .name = .archunit_acceptance_violating,
+    .version = "0.0.0",
+    .fingerprint = 0xbe7ed082bca0b77d,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{ "build.zig", "build.zig.zon", "include", "src", "testdata", "tests", "vendor" },
+}
