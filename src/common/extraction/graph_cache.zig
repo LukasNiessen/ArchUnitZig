@@ -6,6 +6,8 @@ const common_path = @import("../path.zig");
 const extraction_options = @import("extraction_options.zig");
 const graph_module = @import("graph.zig");
 const module_resolver = @import("module_resolver.zig");
+const workspace = @import("workspace.zig");
+const workspace_options = @import("workspace_options.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -13,9 +15,10 @@ pub const BuildGraphMode = extraction_options.BuildGraphMode;
 pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const Graph = graph_module.Graph;
 
-const cache_key_schema_version: u64 = 3;
+const cache_key_schema_version: u64 = 5;
 const keyed_option_fields = [_][]const u8{
     "exclusions",
+    "workspace",
     "strictness",
     "include_resources",
     "include_c_imports",
@@ -23,9 +26,11 @@ const keyed_option_fields = [_][]const u8{
     "module_resolution",
     "build_graph_mode",
 };
+const keyed_workspace_fields = [_][]const u8{ "mode", "packages" };
+const keyed_workspace_package_fields = [_][]const u8{ "id", "path" };
 const keyed_module_resolution_fields = [_][]const u8{"compilation_units"};
-const keyed_compilation_unit_fields = [_][]const u8{ "id", "root_source_path", "modules" };
-const keyed_module_override_fields = [_][]const u8{ "name", "source_path", "origin" };
+const keyed_compilation_unit_fields = [_][]const u8{ "id", "package_id", "root_source_path", "modules" };
+const keyed_module_override_fields = [_][]const u8{ "name", "package_id", "source_path", "origin" };
 
 /// Owned canonical cache identity. Hashes accelerate lookup; equality always compares full bytes.
 pub const GraphCacheKey = struct {
@@ -58,11 +63,21 @@ pub fn buildGraphCacheKey(
     defer allocator.free(canonical_root);
     var root_policy = try archignore.load(allocator, io, canonical_root, diagnostics);
     defer root_policy.deinit(allocator);
+    var topology = try workspace.load(
+        allocator,
+        io,
+        canonical_root,
+        options.workspace,
+        &root_policy,
+        diagnostics,
+    );
+    defer topology.deinit(allocator);
     return buildCanonicalGraphCacheKey(
         allocator,
         canonical_root,
         options,
         &root_policy,
+        if (options.workspace.mode == .single_package) null else &topology,
         diagnostics,
     );
 }
@@ -76,6 +91,35 @@ pub fn buildGraphCacheKeyWithArchIgnore(
     root_policy: *const archignore.ArchIgnore,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!GraphCacheKey {
+    var topology = try workspace.load(
+        allocator,
+        io,
+        project_root,
+        options.workspace,
+        root_policy,
+        diagnostics,
+    );
+    defer topology.deinit(allocator);
+    return buildGraphCacheKeyWithContext(
+        allocator,
+        io,
+        project_root,
+        options,
+        root_policy,
+        if (options.workspace.mode == .single_package) null else &topology,
+        diagnostics,
+    );
+}
+
+pub fn buildGraphCacheKeyWithContext(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
+    topology: ?*const workspace.Workspace,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!GraphCacheKey {
     const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
     defer allocator.free(canonical_root);
     return buildCanonicalGraphCacheKey(
@@ -83,6 +127,7 @@ pub fn buildGraphCacheKeyWithArchIgnore(
         canonical_root,
         options,
         root_policy,
+        topology,
         diagnostics,
     );
 }
@@ -114,6 +159,7 @@ fn buildCanonicalGraphCacheKey(
     canonical_root: []const u8,
     options: ExtractionOptions,
     root_policy: *const archignore.ArchIgnore,
+    topology: ?*const workspace.Workspace,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!GraphCacheKey {
     const normalized_root = common_path.normalize(allocator, canonical_root) catch {
@@ -123,7 +169,7 @@ fn buildCanonicalGraphCacheKey(
 
     var encoded: std.ArrayList(u8) = .empty;
     errdefer encoded.deinit(allocator);
-    appendKey(allocator, &encoded, normalized_root, options, root_policy) catch {
+    appendKey(allocator, &encoded, normalized_root, options, root_policy, topology) catch {
         return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     const bytes = encoded.toOwnedSlice(allocator) catch {
@@ -138,12 +184,35 @@ fn appendKey(
     canonical_root: []const u8,
     options: ExtractionOptions,
     root_policy: *const archignore.ArchIgnore,
+    topology: ?*const workspace.Workspace,
 ) Allocator.Error!void {
     try appendU64(allocator, encoded, cache_key_schema_version);
     try appendString(allocator, encoded, canonical_root);
     try appendString(allocator, encoded, root_policy.path);
     try encoded.append(allocator, @intFromBool(root_policy.present));
     try appendString(allocator, encoded, &root_policy.fingerprint);
+    try appendU64(allocator, encoded, @intFromEnum(options.workspace.mode));
+    try appendU64(allocator, encoded, options.workspace.packages.len);
+    for (options.workspace.packages) |package| {
+        try appendString(allocator, encoded, package.id);
+        try appendString(allocator, encoded, package.path);
+    }
+    if (topology) |resolved| {
+        try encoded.append(allocator, 1);
+        try appendU64(allocator, encoded, resolved.items().len);
+        for (resolved.items()) |package| {
+            try appendString(allocator, encoded, package.id);
+            try appendString(allocator, encoded, package.relative_path);
+            try appendString(allocator, encoded, package.path);
+            try appendString(allocator, encoded, package.manifest_path);
+            try appendString(allocator, encoded, &package.manifest_fingerprint);
+            try appendString(allocator, encoded, package.policy.path);
+            try encoded.append(allocator, @intFromBool(package.policy.present));
+            try appendString(allocator, encoded, &package.policy.fingerprint);
+        }
+    } else {
+        try encoded.append(allocator, 0);
+    }
     try appendU64(allocator, encoded, @intFromEnum(options.strictness));
     try encoded.append(allocator, @intFromBool(options.include_resources));
     try encoded.append(allocator, @intFromBool(options.include_c_imports));
@@ -157,6 +226,12 @@ fn appendKey(
     try appendU64(allocator, encoded, units.len);
     for (units) |unit| {
         try appendString(allocator, encoded, unit.id);
+        if (unit.package_id) |package_id| {
+            try encoded.append(allocator, 1);
+            try appendString(allocator, encoded, package_id);
+        } else {
+            try encoded.append(allocator, 0);
+        }
         if (unit.root_source_path) |root_source_path| {
             try encoded.append(allocator, 1);
             try appendString(allocator, encoded, root_source_path);
@@ -166,6 +241,12 @@ fn appendKey(
         try appendU64(allocator, encoded, unit.modules.len);
         for (unit.modules) |module| {
             try appendString(allocator, encoded, module.name);
+            if (module.package_id) |package_id| {
+                try encoded.append(allocator, 1);
+                try appendString(allocator, encoded, package_id);
+            } else {
+                try encoded.append(allocator, 0);
+            }
             try appendString(allocator, encoded, module.source_path);
             try appendU64(allocator, encoded, @intFromEnum(module.origin));
         }
@@ -315,6 +396,10 @@ fn makeGraph(allocator: Allocator, target: []const u8) !Graph {
 test "canonical roots produce equal keys and every option separates keys" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .name = .fixture, .version = \"0.0.0\", .fingerprint = 0x3333333333333333 }",
+    });
     const root = try temporaryRoot(&tmp);
     defer std.testing.allocator.free(root);
     const dotted_root = try std.fs.path.join(std.testing.allocator, &.{ root, "." });
@@ -341,8 +426,10 @@ test "canonical roots produce equal keys and every option separates keys" {
         .root_source_path = "src/main.zig",
         .modules = &modules,
     }};
+    const packages = [_]workspace_options.WorkspacePackage{.{ .id = "root", .path = "." }};
     const variants = [_]ExtractionOptions{
         .{ .exclusions = &exclusions },
+        .{ .workspace = .{ .mode = .explicit_packages, .packages = &packages } },
         .{ .strictness = .permissive },
         .{ .include_resources = false },
         .{ .include_c_imports = false },
@@ -401,6 +488,44 @@ test "cache keys encode root archignore path presence and exact content fingerpr
     try std.testing.expect(!alpha.eql(bravo));
 }
 
+test "workspace cache keys separate manifest edits and discovered topology" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "packages/api");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .name = .root, .version = \"0.0.0\", .fingerprint = 0x4444444444444444 }",
+    });
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "packages/api/build.zig.zon",
+        .data = ".{ .name = .api, .version = \"0.0.0\", .fingerprint = 0x5555555555555555 }",
+    });
+    const root = try temporaryRoot(&tmp);
+    defer std.testing.allocator.free(root);
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    const options = ExtractionOptions{ .workspace = .{ .mode = .discover_packages } };
+
+    var baseline = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, options, &context);
+    defer baseline.deinit(std.testing.allocator);
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "packages/api/build.zig.zon",
+        .data = ".{ .name = .api, .version = \"0.0.1\", .fingerprint = 0x5555555555555555 }",
+    });
+    var edited = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, options, &context);
+    defer edited.deinit(std.testing.allocator);
+    try std.testing.expect(!baseline.eql(edited));
+
+    try tmp.dir.createDirPath(std.testing.io, "packages/shared");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "packages/shared/build.zig.zon",
+        .data = ".{ .name = .shared, .version = \"0.0.0\", .fingerprint = 0x6666666666666666 }",
+    });
+    var added = try buildGraphCacheKey(std.testing.allocator, std.testing.io, root, options, &context);
+    defer added.deinit(std.testing.allocator);
+    try std.testing.expect(!edited.eql(added));
+}
+
 test "every compilation-unit and module mapping field separates cache keys" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -411,28 +536,34 @@ test "every compilation-unit and module mapping field separates cache keys" {
 
     const Mapping = struct {
         unit_id: []const u8 = "app",
+        unit_package_id: ?[]const u8 = null,
         root_source_path: ?[]const u8 = "src/main.zig",
         module_name: []const u8 = "domain",
+        module_package_id: ?[]const u8 = null,
         module_source_path: []const u8 = "src/domain/root.zig",
         module_origin: module_resolver.ModuleOrigin = .project,
     };
     const baseline_mapping: Mapping = .{};
     const variants = [_]Mapping{
         .{ .unit_id = "tests" },
+        .{ .unit_package_id = "api" },
         .{ .root_source_path = null },
         .{ .root_source_path = "src/other.zig" },
         .{ .module_name = "application" },
+        .{ .module_package_id = "shared" },
         .{ .module_source_path = "src/application/root.zig" },
         .{ .module_origin = .package },
     };
 
     const baseline_modules = [_]module_resolver.ModuleOverride{.{
         .name = baseline_mapping.module_name,
+        .package_id = baseline_mapping.module_package_id,
         .source_path = baseline_mapping.module_source_path,
         .origin = baseline_mapping.module_origin,
     }};
     const baseline_units = [_]module_resolver.CompilationUnitOverride{.{
         .id = baseline_mapping.unit_id,
+        .package_id = baseline_mapping.unit_package_id,
         .root_source_path = baseline_mapping.root_source_path,
         .modules = &baseline_modules,
     }};
@@ -448,11 +579,13 @@ test "every compilation-unit and module mapping field separates cache keys" {
     for (variants) |mapping| {
         const modules = [_]module_resolver.ModuleOverride{.{
             .name = mapping.module_name,
+            .package_id = mapping.module_package_id,
             .source_path = mapping.module_source_path,
             .origin = mapping.module_origin,
         }};
         const units = [_]module_resolver.CompilationUnitOverride{.{
             .id = mapping.unit_id,
+            .package_id = mapping.unit_package_id,
             .root_source_path = mapping.root_source_path,
             .modules = &modules,
         }};
@@ -560,6 +693,8 @@ fn expectKeySchemaCovers(comptime T: type, keyed_fields: []const []const u8) !vo
 
 test "cache key schema lists every extraction and module-mapping option" {
     try expectKeySchemaCovers(ExtractionOptions, &keyed_option_fields);
+    try expectKeySchemaCovers(workspace_options.WorkspaceOptions, &keyed_workspace_fields);
+    try expectKeySchemaCovers(workspace_options.WorkspacePackage, &keyed_workspace_package_fields);
     try expectKeySchemaCovers(module_resolver.ModuleResolutionOverrides, &keyed_module_resolution_fields);
     try expectKeySchemaCovers(module_resolver.CompilationUnitOverride, &keyed_compilation_unit_fields);
     try expectKeySchemaCovers(module_resolver.ModuleOverride, &keyed_module_override_fields);

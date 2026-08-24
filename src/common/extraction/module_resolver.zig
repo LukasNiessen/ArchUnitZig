@@ -20,6 +20,8 @@ pub const ModuleOrigin = enum {
 /// source happens to be stored below the analyzed project root.
 pub const ModuleOverride = struct {
     name: []const u8,
+    /// Workspace package containing a project mapping. `null` means the compilation unit's package.
+    package_id: ?[]const u8 = null,
     source_path: []const u8,
     origin: ModuleOrigin = .project,
 };
@@ -27,8 +29,16 @@ pub const ModuleOverride = struct {
 /// Borrowed module context for one library, executable, test, or other Zig compilation root.
 pub const CompilationUnitOverride = struct {
     id: []const u8,
+    /// Required for workspace extraction and ignored by compatible single-package extraction.
+    package_id: ?[]const u8 = null,
     root_source_path: ?[]const u8 = null,
     modules: []const ModuleOverride = &.{},
+};
+
+/// Borrowed package identity and canonical root used by workspace-aware module resolution.
+pub const WorkspacePackageRoot = struct {
+    id: []const u8,
+    path: []const u8,
 };
 
 /// Borrowed collection of independently validated compilation contexts.
@@ -116,6 +126,74 @@ pub fn resolveModuleReference(
     };
 }
 
+/// Resolves module-defined imports in a package-qualified workspace compilation context.
+/// Project mappings produce `package_id::package-relative/path` source identities, while
+/// package-origin mappings remain external to the analyzed workspace.
+pub fn resolveWorkspaceModuleReference(
+    allocator: Allocator,
+    io: Io,
+    packages: []const WorkspacePackageRoot,
+    source_package_id: []const u8,
+    unit: CompilationUnitOverride,
+    reference: DependencyReference,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!?ResolvedModuleReference {
+    if (!isModuleDefined(reference.kind)) return null;
+    try validateCompilationUnit(unit, diagnostics);
+    const unit_package_id = unit.package_id orelse
+        return diagnostics.failUser(.invalid_module_override, "module.validate_workspace_unit", unit.id, null);
+    if (!std.mem.eql(u8, unit_package_id, source_package_id)) {
+        return diagnostics.failUser(.invalid_module_override, "module.validate_workspace_unit", unit.id, null);
+    }
+    const source_package = findWorkspacePackage(packages, source_package_id) orelse
+        return diagnostics.failUser(.invalid_module_override, "module.validate_workspace_package", source_package_id, null);
+
+    return switch (reference.kind) {
+        .standard_library, .builtin_module => try makeResolved(
+            allocator,
+            reference,
+            null,
+            .compiler_provided,
+            diagnostics,
+        ),
+        .root_module => if (unit.root_source_path) |root_source_path|
+            try resolveWorkspaceProjectMapping(
+                allocator,
+                io,
+                packages,
+                unit_package_id,
+                root_source_path,
+                reference,
+                diagnostics,
+            )
+        else
+            try makeResolved(allocator, reference, null, .unresolved, diagnostics),
+        .named_module => if (findModule(unit.modules, reference.target)) |module|
+            switch (module.origin) {
+                .project => try resolveWorkspaceProjectMapping(
+                    allocator,
+                    io,
+                    packages,
+                    module.package_id orelse unit_package_id,
+                    module.source_path,
+                    reference,
+                    diagnostics,
+                ),
+                .package => try resolvePackageMapping(
+                    allocator,
+                    io,
+                    source_package.path,
+                    module.source_path,
+                    reference,
+                    diagnostics,
+                ),
+            }
+        else
+            try makeResolved(allocator, reference, null, .unresolved, diagnostics),
+        .zig_file, .zon_file, .embedded_file, .c_header => unreachable,
+    };
+}
+
 /// Validates every explicit context and rejects duplicate context identifiers.
 pub fn validateModuleResolutionOverrides(
     overrides: ModuleResolutionOverrides,
@@ -138,6 +216,9 @@ fn validateCompilationUnit(
     if (unit.id.len == 0) {
         return diagnostics.failUser(.invalid_module_override, "module.validate_unit", unit.id, null);
     }
+    if (unit.package_id) |package_id| if (package_id.len == 0) {
+        return diagnostics.failUser(.invalid_module_override, "module.validate_package", unit.id, null);
+    };
     if (unit.root_source_path) |root_source_path| if (root_source_path.len == 0) {
         return diagnostics.failUser(.invalid_module_override, "module.validate_root", unit.id, null);
     };
@@ -145,12 +226,22 @@ fn validateCompilationUnit(
         if (module.name.len == 0 or module.source_path.len == 0 or isReservedModule(module.name)) {
             return diagnostics.failUser(.invalid_module_override, "module.validate_alias", module.name, null);
         }
+        if (module.package_id) |package_id| {
+            if (package_id.len == 0 or module.origin == .package) {
+                return diagnostics.failUser(.invalid_module_override, "module.validate_package", module.name, null);
+            }
+        }
         for (unit.modules[0..index]) |prior| {
             if (std.mem.eql(u8, prior.name, module.name)) {
                 return diagnostics.failUser(.invalid_module_override, "module.validate_alias", module.name, null);
             }
         }
     }
+}
+
+fn findWorkspacePackage(packages: []const WorkspacePackageRoot, id: []const u8) ?WorkspacePackageRoot {
+    for (packages) |package| if (std.mem.eql(u8, package.id, id)) return package;
+    return null;
 }
 
 fn findModule(modules: []const ModuleOverride, name: []const u8) ?ModuleOverride {
@@ -199,6 +290,36 @@ fn resolveProjectMapping(
         .outside_project => .outside_project,
     };
     return makeResolved(allocator, reference, file_resolution.target, status, diagnostics);
+}
+
+fn resolveWorkspaceProjectMapping(
+    allocator: Allocator,
+    io: Io,
+    packages: []const WorkspacePackageRoot,
+    package_id: []const u8,
+    mapped_source_path: []const u8,
+    reference: DependencyReference,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!ResolvedModuleReference {
+    const package = findWorkspacePackage(packages, package_id) orelse
+        return diagnostics.failUser(.invalid_module_override, "module.validate_workspace_package", package_id, null);
+    var resolution = try resolveProjectMapping(
+        allocator,
+        io,
+        package.path,
+        mapped_source_path,
+        reference,
+        diagnostics,
+    );
+    errdefer resolution.deinit(allocator);
+    if (resolution.source_path) |source_path| {
+        const qualified = std.fmt.allocPrint(allocator, "{s}::{s}", .{ package_id, source_path }) catch {
+            return diagnostics.failTechnical(.out_of_memory, "module.resolve_workspace", reference.target, error.OutOfMemory);
+        };
+        allocator.free(source_path);
+        resolution.source_path = qualified;
+    }
+    return resolution;
 }
 
 fn resolvePackageMapping(
@@ -332,6 +453,101 @@ fn writeFixture(dir: std.Io.Dir, path: []const u8, data: []const u8) !void {
 
 fn temporaryRoot(tmp: *std.testing.TmpDir, sub_path: []const u8) ![:0]u8 {
     return tmp.dir.realPathFileAlloc(std.testing.io, sub_path, std.testing.allocator);
+}
+
+test "workspace module contexts qualify roots and cross-package project aliases" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFixture(tmp.dir, "apps/api/src/main.zig", "");
+    try writeFixture(tmp.dir, "libs/shared/src/root.zig", "");
+    const api_root = try temporaryRoot(&tmp, "apps/api");
+    defer std.testing.allocator.free(api_root);
+    const shared_root = try temporaryRoot(&tmp, "libs/shared");
+    defer std.testing.allocator.free(shared_root);
+    const packages = [_]WorkspacePackageRoot{
+        .{ .id = "api", .path = api_root },
+        .{ .id = "shared", .path = shared_root },
+    };
+    const modules = [_]ModuleOverride{.{
+        .name = "shared",
+        .package_id = "shared",
+        .source_path = "src/root.zig",
+    }};
+    const unit = CompilationUnitOverride{
+        .id = "api-executable",
+        .package_id = "api",
+        .root_source_path = "src/main.zig",
+        .modules = &modules,
+    };
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+
+    var root = (try resolveWorkspaceModuleReference(
+        std.testing.allocator,
+        std.testing.io,
+        &packages,
+        "api",
+        unit,
+        makeReference("root", .root_module),
+        &context,
+    )).?;
+    defer root.deinit(std.testing.allocator);
+    try std.testing.expectEqual(ModuleResolutionStatus.resolved_project, root.status);
+    try std.testing.expectEqualStrings("api::src/main.zig", root.source_path.?);
+
+    var shared = (try resolveWorkspaceModuleReference(
+        std.testing.allocator,
+        std.testing.io,
+        &packages,
+        "api",
+        unit,
+        makeReference("shared", .named_module),
+        &context,
+    )).?;
+    defer shared.deinit(std.testing.allocator);
+    try std.testing.expectEqual(ModuleResolutionStatus.resolved_project, shared.status);
+    try std.testing.expectEqualStrings("shared::src/root.zig", shared.source_path.?);
+}
+
+test "workspace module contexts reject missing and external package identities" {
+    var context = common_error.ErrorContext.init(std.testing.allocator);
+    defer context.deinit();
+    const packages = [_]WorkspacePackageRoot{.{ .id = "api", .path = "." }};
+    const missing_modules = [_]ModuleOverride{.{
+        .name = "missing",
+        .package_id = "unknown",
+        .source_path = "src/root.zig",
+    }};
+    const missing_unit = CompilationUnitOverride{
+        .id = "api",
+        .package_id = "api",
+        .modules = &missing_modules,
+    };
+    try std.testing.expectError(error.InvalidModuleOverride, resolveWorkspaceModuleReference(
+        std.testing.allocator,
+        std.testing.io,
+        &packages,
+        "api",
+        missing_unit,
+        makeReference("missing", .named_module),
+        &context,
+    ));
+
+    context.clear();
+    const external_modules = [_]ModuleOverride{.{
+        .name = "dependency",
+        .package_id = "api",
+        .source_path = ".zig-cache/p/dependency/root.zig",
+        .origin = .package,
+    }};
+    try std.testing.expectError(error.InvalidModuleOverride, validateModuleResolutionOverrides(
+        .{ .compilation_units = &.{.{
+            .id = "api",
+            .package_id = "api",
+            .modules = &external_modules,
+        }} },
+        &context,
+    ));
 }
 
 test "resolves roots and local aliases per compilation unit without executing build.zig" {

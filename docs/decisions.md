@@ -1283,3 +1283,44 @@ Consequence: repositories can keep generated or vendored source out of every arc
 without repeating options in each test; configuration errors are visible; Windows-authored patterns
 stay portable; nested projects cannot silently override their parent's scan; and cached graphs never
 outlive the exact root policy bytes that selected their source files.
+
+### D052 — Workspace identity is explicit and build scripts remain inert
+
+`ExtractionOptions.workspace.mode` is `single_package`, `explicit_packages`, or
+`discover_packages`. The compatible default preserves every existing package-relative identifier and
+stops at nested marked projects. Explicit mode requires a non-empty borrowed list of unique
+`WorkspacePackage { id, path }` values whose canonical directories remain below the located root and
+contain `build.zig.zon`. Discovery mode accepts no explicit list and finds the root manifest plus all
+nested manifests beneath the located repository root. It prunes the same cache, VCS, output,
+documentation, dependency, symlink, and reparse-point boundaries as source enumeration, but it keeps
+searching below one package to find deliberately nested packages.
+
+Workspace internal identifiers are `package_id::package-relative/path`. Explicit ids are validated
+non-empty labels without `::`; discovered ids are normalized manifest-directory paths and `.` names
+the root. This namespace is visible to selectors and reports, rather than hiding identity in cache-
+only metadata. Two packages may therefore own identical `src/main.zig` paths without creating one
+node or merging edges. Single-package consumers pay no migration cost.
+
+Workspace compilation units require `CompilationUnitOverride.package_id`. Root-source paths remain
+package-relative, and `@import("root")` resolves only inside that unit's package. A project-origin
+`ModuleOverride` without `package_id` targets the unit package; setting it names another selected
+package and models a local cross-package alias. Package-origin aliases remain external and cannot
+also name a workspace package. No `build.zig` code is executed and no alias table is guessed from
+manifest dependency declarations.
+
+Exclusions have three deliberate coordinate systems. The workspace-root `.archignore` is matched
+against physical repository-relative paths during discovery and corpus assembly. Each package-root
+`.archignore` is matched against its package-relative paths by the ordinary enumerator. Explicit
+`ExtractionOptions.exclusions` are matched against final qualified identifiers. All remain additive;
+built-in directory pruning applies both to discovery and per-package traversal.
+
+One owned workspace snapshot is shared by cache-key construction and extraction. It records sorted
+package ids, normalized relative and canonical paths, exact `build.zig.zon` SHA-256 fingerprints,
+and each package ignore path/presence/fingerprint. The cache key also encodes the workspace mode and
+ordered explicit selection input. Adding, removing, moving, renaming, or editing a selected manifest
+or policy therefore separates graphs without a read-key/read-scan race.
+
+Consequence: monorepos can analyze one package, a reviewed set, or all manifest packages; duplicate
+relative paths remain distinct; local module edges and `root` keep compilation context; dependency
+caches stay outside discovery; and workspace topology changes cannot reuse a stale single-package or
+multi-package cache entry.
