@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.16.0"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  compatibility:
+    name: Debug · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Test pinned toolchain installer
+        run: python -B -m unittest scripts.test_install_zig
+
+      - name: Install checksum-pinned Zig
+        run: >-
+          python -B scripts/install_zig.py
+          --version "${{ env.ZIG_VERSION }}"
+          --destination "${{ runner.temp }}/zig-${{ env.ZIG_VERSION }}"
+
+      - name: Verify Zig version
+        run: zig version
+
+      - name: Run unit, acceptance, dogfood, and consumer tests
+        run: zig build test -Doptimize=Debug
+
+  quality:
+    name: ReleaseSafe, formatting, and docs · Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Test pinned toolchain installer
+        run: python -B -m unittest scripts.test_install_zig
+
+      - name: Validate pinned CI contract
+        run: python -B scripts/check_ci.py
+
+      - name: Install checksum-pinned Zig
+        run: >-
+          python -B scripts/install_zig.py
+          --version "${{ env.ZIG_VERSION }}"
+          --destination "${{ runner.temp }}/zig-${{ env.ZIG_VERSION }}"
+
+      - name: Verify Zig version
+        run: zig version
+
+      - name: Check Zig formatting
+        run: >-
+          zig fmt --check
+          build.zig build.zig.zon src
+          test/acceptance.zig test/dogfood.zig test/readme.zig test/readme
+
+      - name: Run ReleaseSafe unit, acceptance, dogfood, and consumer tests
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Build and validate ReleaseSafe guide and API docs
+        run: zig build docs -Doptimize=ReleaseSafe
+
+      - name: Upload validated documentation site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: documentation-site
+          path: zig-out/docs-site
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy:
+    name: Deploy GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'LukasNiessen/ArchUnitZig'
+    needs:
+      - compatibility
+      - quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download validated site
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: documentation-site
+          path: _site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Package Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
