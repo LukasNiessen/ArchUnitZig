@@ -410,6 +410,23 @@ Every terminal rule is directly checkable through `check(CheckOptions)`. Options
 configuration, and the centralized extraction options. Their slices are borrowed only for the call;
 every returned `ViolationList` is owned by the supplied allocator.
 
+Logging remains dormant when `CheckOptions.logging` is null: no clock read, allocation, writer, or
+ambient stdout/stderr access occurs. When configured, the public terminal creates one operation-local
+logger and threads its pointer through the copied check options. Nested extraction and analysis reuse
+that logger rather than opening another file or duplicating lifecycle events. Graph, slice, and
+metrics render/export terminals use the same session boundary. Configuration, writers, structured
+sink contexts, and clocks are borrowed; an opened file and its resolved path belong to the session.
+
+The fixed event vocabulary is check start/end, extraction, cache, violation, metric, and export,
+plus an internal generic message event. Levels filter before formatting or reading the clock.
+Absolute metric subjects and export destinations are reduced to their basename, lifecycle and
+progress events contain stable rule/phase names rather than project roots, control bytes are
+neutralized, and messages are bounded. Project-relative evidence remains visible where it is useful.
+Logging failures normally propagate through the active operation; if the check itself already
+failed, that original error wins over a secondary failure while recording its final error event.
+Independent options create independent sessions, so concurrent callers share no mutable logger
+state unless they deliberately provide the same external sink.
+
 Heterogeneous rule collections use owned `Checkable` boxes. `fromMove` makes the transfer explicit
 and prevents a stored handle from dangling after a stack rule leaves scope. `checkAll` runs boxes in
 order, moves their violations into one result, and discards partial results when a later rule returns
