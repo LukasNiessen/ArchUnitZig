@@ -159,7 +159,7 @@ def consumer_zon() -> str:
     return """.{
     .name = .archunit_release_consumer,
     .version = \"0.0.0\",
-    .fingerprint = 0xa4c6a049e1b57d23,
+    .fingerprint = 0x1c2d2db2de015cbb,
     .minimum_zig_version = \"0.16.0\",
     .dependencies = .{},
     .paths = .{ \"build.zig\", \"build.zig.zon\", \"src\", \"test\" },
