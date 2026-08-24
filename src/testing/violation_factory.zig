@@ -59,6 +59,7 @@ pub const ViolationFactory = struct {
             .file_dependency => |value| formatFileDependency(allocator, value, rule_sentence),
             .layer_dependency => |value| formatLayerDependency(allocator, value, rule_sentence),
             .matching => |value| formatMatching(allocator, value, rule_sentence),
+            .metric => |value| formatMetric(allocator, value, rule_sentence),
             .slice_dependency => |value| formatSliceDependency(allocator, value, rule_sentence),
         };
     }
@@ -99,6 +100,43 @@ fn formatEmptyTest(
         writeScope(&output.writer, value.scope) catch return error.OutOfMemory;
     }
     return finish(allocator, "Empty test violation", "empty_test", value.rule_id, &output);
+}
+
+fn formatMetric(
+    allocator: Allocator,
+    value: assertion.MetricViolation,
+    rule_sentence: []const u8,
+) FormatError!FormattedViolation {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    writeRule(&output.writer, rule_sentence) catch return error.OutOfMemory;
+    output.writer.print(
+        "\nTarget: {s} ({s})\nMetric: {s}\nMeasured: ",
+        .{ value.target_identifier, @tagName(value.target_kind), value.metric_name },
+    ) catch return error.OutOfMemory;
+    writeMetricValue(&output.writer, value.measured) catch return error.OutOfMemory;
+    output.writer.print("\nExpected: {s} ", .{metricComparisonPhrase(value.comparison)}) catch
+        return error.OutOfMemory;
+    writeMetricValue(&output.writer, value.threshold) catch return error.OutOfMemory;
+    return finish(allocator, "Metric threshold violation", "metric", value.target_identifier, &output);
+}
+
+fn writeMetricValue(writer: *std.Io.Writer, value: assertion.MetricValue) std.Io.Writer.Error!void {
+    switch (value) {
+        .signed => |number| try writer.print("{d}", .{number}),
+        .unsigned => |number| try writer.print("{d}", .{number}),
+        .floating => |number| try writer.print("{d}", .{number}),
+    }
+}
+
+fn metricComparisonPhrase(comparison: assertion.MetricComparison) []const u8 {
+    return switch (comparison) {
+        .below => "below",
+        .above => "above",
+        .equal => "equal to",
+        .below_or_equal => "below or equal to",
+        .above_or_equal => "above or equal to",
+    };
 }
 
 fn formatMatching(
@@ -983,6 +1021,36 @@ test "slice dependency formatter distinguishes forbidden evidence from a require
         missing_formatted.details,
         "Reason: PlantUML diagram dependency is absent from the project graph",
     ) != null);
+}
+
+test "metric formatter preserves target value comparison and threshold" {
+    var payload = try assertion.MetricViolation.init(
+        std.testing.allocator,
+        "src/model.zig:Order",
+        .container,
+        "functions",
+        .{ .unsigned = 7 },
+        .below_or_equal,
+        .{ .unsigned = 5 },
+    );
+    var violation = assertion.Violation.fromMetricMove(&payload);
+    defer violation.deinit(std.testing.allocator);
+    var formatted = try ViolationFactory.fromViolation(
+        std.testing.allocator,
+        violation,
+        "selected Zig containers count functions should be below or equal to 5",
+    );
+    defer formatted.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Metric threshold violation", formatted.heading);
+    try std.testing.expectEqualStrings(
+        "Rule: selected Zig containers count functions should be below or equal to 5\n" ++
+            "Target: src/model.zig:Order (container)\n" ++
+            "Metric: functions\n" ++
+            "Measured: 7\n" ++
+            "Expected: below or equal to 5",
+        formatted.details,
+    );
 }
 
 test "cycle formatter preserves traversal and renders each concrete import" {
