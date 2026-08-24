@@ -27,6 +27,7 @@ the repository documentation records decisions that outlive an individual ticket
    python -B scripts/check_ci.py
    zig build test -Doptimize=ReleaseSafe
    zig build docs -Doptimize=ReleaseSafe
+   zig build benchmark-check
    ```
 
 5. Open a pull request that links the issue, explains Zig-specific trade-offs, and records the exact
@@ -65,7 +66,8 @@ README/license root commit is the one unavoidable exception to the pull-request 
 
 CI runs Debug tests on current GitHub-hosted Linux, Windows, and macOS runners. A Linux quality job
 checks formatting, reruns the complete suite in `ReleaseSafe`, builds the documentation site and Zig
-API docs, and uploads the validated artifact. The complete test command includes unit tests,
+API docs, runs the deterministic extraction benchmark, and uploads both validated artifacts. The
+complete test command includes unit tests,
 acceptance fixtures, executable dogfood rules, and the standalone README consumer.
 
 Zig 0.16.0 is installed by `scripts/install_zig.py` from exact official archive URLs. The script
@@ -73,3 +75,9 @@ checks both the published byte size and SHA-256 before extraction. External work
 pinned to immutable commits with their reviewed release tag in a comment. CI deliberately uses no
 dependency or build cache; adding one requires a key containing the Zig version and all relevant ZON
 hash/lock inputs.
+
+Performance work starts with evidence. `zig build benchmark` generates the versioned fixture and
+writes `zig-out/benchmark/results.json`; `zig build benchmark-check` also enforces the broad budgets
+recorded in `benchmark/budgets.json`. Update those budgets only from an uncached hosted Linux CI run,
+and preserve substantial headroom for shared-runner variance. Correctness, deterministic graph
+output, cache behavior, and zero live tracked allocations remain hard gates in both modes.

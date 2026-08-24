@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "evidence": {
+    "status": "hosted-ci-green",
+    "runner": "ubuntu-latest",
+    "run_url": "https://github.com/LukasNiessen/ArchUnitZig/actions/runs/32723254284",
+    "observed_commit": "8fcd3476c5db9828a9bdbde2afdb6f19a3983abb",
+    "baseline": {
+      "total_duration_ns": 784640735,
+      "peak_live_bytes": 5966099,
+      "stages": {
+        "enumeration_ns": 480079,
+        "source_loading_ns": 3344149,
+        "tokenize_parse_ns": 37220524,
+        "resolution_classification_ns": 151594513,
+        "normalization_ns": 36955236,
+        "projection_ns": 53994820,
+        "first_check_ns": 183165402,
+        "cached_checks_ns": 317886012,
+        "cached_check_per_iteration_ns": 15894301
+      }
+    }
+  },
+  "max_total_ns": 20000000000,
+  "max_peak_live_bytes": 67108864,
+  "stages": {
+    "enumeration_ns": 100000000,
+    "source_loading_ns": 200000000,
+    "tokenize_parse_ns": 1000000000,
+    "resolution_classification_ns": 4000000000,
+    "normalization_ns": 1000000000,
+    "projection_ns": 1500000000,
+    "first_check_ns": 5000000000,
+    "cached_check_per_iteration_ns": 500000000
+  }
+}

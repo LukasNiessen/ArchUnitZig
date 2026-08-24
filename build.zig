@@ -93,11 +93,56 @@ pub fn build(b: *std.Build) void {
     const run_readme_tests = b.addRunArtifact(readme_tests);
     run_readme_tests.setCwd(b.path("test/fixtures/readme-consumer"));
 
+    const benchmark_archunit = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    const benchmark_regex_dependency = b.dependency("regex", .{
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    benchmark_archunit.addImport("regex", benchmark_regex_dependency.module("regex"));
+
+    const benchmark_module = b.createModule(.{
+        .root_source_file = b.path("benchmark/extraction.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    benchmark_module.addImport("archunit", benchmark_archunit);
+    const benchmark_executable = b.addExecutable(.{
+        .name = "archunit-extraction-benchmark",
+        .root_module = benchmark_module,
+    });
+    const run_benchmark = b.addRunArtifact(benchmark_executable);
+    run_benchmark.setCwd(b.path("."));
+    if (b.args) |args| run_benchmark.addArgs(args);
+
+    const benchmark_contracts = b.createModule(.{
+        .root_source_file = b.path("benchmark/contracts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const benchmark_tests = b.addTest(.{ .root_module = benchmark_contracts });
+    benchmark_tests.step.dependOn(&run_readme_tests.step);
+    const run_benchmark_tests = b.addRunArtifact(benchmark_tests);
+    run_benchmark_tests.setCwd(b.path("."));
+
+    const benchmark_step = b.step("benchmark", "Measure extraction and cached rule performance");
+    benchmark_step.dependOn(&run_benchmark.step);
+
+    const benchmark_check_run = b.addRunArtifact(benchmark_executable);
+    benchmark_check_run.setCwd(b.path("."));
+    benchmark_check_run.addArg("--enforce-budgets");
+    const benchmark_check_step = b.step("benchmark-check", "Measure and enforce hosted-CI performance budgets");
+    benchmark_check_step.dependOn(&benchmark_check_run.step);
+
     const format_check = b.addFmt(.{
         .paths = &.{
             "build.zig",
             "build.zig.zon",
             "src",
+            "benchmark",
             "test/acceptance.zig",
             "test/dogfood.zig",
             "test/readme.zig",
@@ -111,7 +156,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = archunit,
     });
-    docs_library.step.dependOn(&run_readme_tests.step);
+    docs_library.step.dependOn(&run_benchmark_tests.step);
 
     const build_docs = b.addSystemCommand(&.{
         python,
@@ -147,5 +192,5 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run formatting checks and tests");
     test_step.dependOn(&format_check.step);
-    test_step.dependOn(&run_readme_tests.step);
+    test_step.dependOn(&run_benchmark_tests.step);
 }

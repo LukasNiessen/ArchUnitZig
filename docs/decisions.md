@@ -1096,8 +1096,9 @@ violating twin.
 ### D046 — Dogfood distinguishes production dependencies from test consumers
 
 The repository checks its own architecture through a separate test root that imports only the
-public `archunit` package. Its production corpus is explicit: `src/**` is analyzed while `build.zig`
-and `test/**` are extraction exclusions. The complete external acceptance fixture remains a
+public `archunit` package. Its production corpus is explicit: `src/**` is analyzed while `build.zig`,
+repository tooling under `benchmark/**`, and `test/**` are extraction exclusions. The complete
+external acceptance fixture remains a
 separate gate, and its violating twin supplies the negative cycle proof. Strict layer assignment and
 a top-folder custom predicate together ensure that connected and isolated production files must
 belong to a named architecture area.
@@ -1213,3 +1214,37 @@ the same Git reference cancel through the workflow concurrency key.
 Consequence: toolchain downloads are reproducible and tamper-evident, allocator and path behavior are
 exercised on the three supported runner families, documentation cannot deploy ahead of code quality,
 and no optional matrix leg or `continue-on-error` can turn a red supported platform into a green PR.
+
+### D050 — Performance gates use deterministic hosted-CI evidence
+
+Performance evidence comes from a generated, versioned project under `.zig-cache/benchmark`, not
+from the repository itself or a developer's changing checkout. Its 240 Zig sources sit below eight
+folder levels and each import twelve deterministic peers plus `std`. Together with `build.zig` and
+`build.zig.zon`, this fixes file, syntax, import, and graph cardinalities. The benchmark pins a digest
+over sorted edges, classification sets, import kinds, and locations, then independently normalises a
+second graph and requires the same digest. Fixture generation is outside every measured window.
+
+The benchmark deliberately composes public facade primitives instead of duplicating private
+extractor logic. It times enumeration, source loading, tokenize/parse, resolution/classification,
+normalisation, and identity projection independently while retaining real outputs between stages.
+It then builds one public fluent rule, clears the process cache for its first check, and repeats the
+same check twenty times without clearing it. This makes cold extraction and cache-hit behavior
+visible without pretending a synthetic parser loop represents the shipped product path.
+
+A forwarding allocator counts allocation calls, newly requested bytes, and peak live caller-owned
+bytes per stage. Every manual pipeline owner is destroyed before fluent checks, every rule owner is
+destroyed afterward, and both boundaries require zero tracked live bytes. The process-wide graph
+cache intentionally retains its existing page-allocator implementation, so reported peaks describe
+the public caller allocator rather than unstable whole-process RSS; cache isolation and page-backed
+cache lifetime remain covered by the exhaustive correctness/leak suite.
+
+`zig build benchmark` always enforces graph counts, the pinned digest, projection cardinality,
+passing rule results, deterministic re-normalisation, and zero live tracked bytes, then writes
+`zig-out/benchmark/results.json`. `zig build benchmark-check` additionally applies generous runtime
+and memory regression budgets from `benchmark/budgets.json`. Runtime is not a public guarantee: the
+budget evidence names the uncached `ubuntu-latest` run used to set it, with substantial variance
+headroom. CI uploads the raw JSON so future optimisation begins from comparable stage evidence.
+
+Consequence: correctness and cache isolation cannot be traded for a faster number; performance
+regressions are visible by stage; allocations can be profiled without platform-specific tooling;
+and budget changes remain auditable against hosted evidence rather than one workstation.
