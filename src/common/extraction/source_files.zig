@@ -37,6 +37,37 @@ pub const SourceFiles = struct {
     }
 };
 
+/// Owned compiled ArchUnit-glob exclusions shared by source and workspace traversal.
+pub const ExclusionSet = struct {
+    allocator: Allocator,
+    filters: std.ArrayList(matching.Filter) = .empty,
+
+    pub fn init(
+        allocator: Allocator,
+        patterns: []const []const u8,
+        diagnostics: *ErrorContext,
+    ) common_error.ArchUnitError!ExclusionSet {
+        return .{
+            .allocator = allocator,
+            .filters = try compileExclusions(allocator, patterns, diagnostics),
+        };
+    }
+
+    pub fn deinit(self: *ExclusionSet) void {
+        for (self.filters.items) |*filter| filter.deinit();
+        self.filters.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    pub fn excludes(
+        self: *const ExclusionSet,
+        relative: []const u8,
+        is_directory: bool,
+    ) Allocator.Error!bool {
+        return isCustomExcluded(self.allocator, relative, is_directory, self.filters.items);
+    }
+};
+
 pub fn enumerateSourceFiles(
     allocator: Allocator,
     io: Io,
@@ -127,11 +158,8 @@ fn enumerateCanonicalSourceFiles(
     combined_patterns.appendSliceAssumeCapacity(options.exclusions);
     combined_patterns.appendSliceAssumeCapacity(root_policy.patterns());
 
-    var exclusions = try compileExclusions(allocator, combined_patterns.items, diagnostics);
-    defer {
-        for (exclusions.items) |*filter| filter.deinit();
-        exclusions.deinit(allocator);
-    }
+    var exclusions = try ExclusionSet.init(allocator, combined_patterns.items, diagnostics);
+    defer exclusions.deinit();
 
     var root_dir = std.Io.Dir.openDirAbsolute(io, canonical_root, .{
         .iterate = true,
@@ -156,7 +184,7 @@ fn enumerateCanonicalSourceFiles(
 
         if (entry.kind == .directory) {
             if (options.include_default_exclusions and isDefaultExcluded(entry.basename)) continue;
-            if (isCustomExcluded(allocator, relative, true, exclusions.items) catch {
+            if (exclusions.excludes(relative, true) catch {
                 return diagnostics.failTechnical(.out_of_memory, "project.match_exclusion", relative, error.OutOfMemory);
             }) continue;
             if (options.stop_at_nested_projects and hasNestedMarker(io, entry) catch |failure| {
@@ -170,7 +198,7 @@ fn enumerateCanonicalSourceFiles(
 
         // Symlinks/reparse points and non-regular filesystem entries are never followed.
         if (entry.kind != .file or !isAnalyzable(relative, options.include_zon)) continue;
-        if (isCustomExcluded(allocator, relative, false, exclusions.items) catch {
+        if (exclusions.excludes(relative, false) catch {
             return diagnostics.failTechnical(.out_of_memory, "project.match_exclusion", relative, error.OutOfMemory);
         }) continue;
 
@@ -252,7 +280,7 @@ fn isCustomExcluded(
     return false;
 }
 
-fn isDefaultExcluded(basename: []const u8) bool {
+pub fn isDefaultExcluded(basename: []const u8) bool {
     for (default_excluded_directories) |excluded| {
         if (std.mem.eql(u8, basename, excluded)) return true;
     }

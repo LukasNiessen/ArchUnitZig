@@ -7,6 +7,9 @@ pub const extractProjectGraphLogged = @import("extraction/project_graph.zig").ex
 pub const GraphCache = @import("extraction/graph_cache.zig").GraphCache;
 pub const GraphCacheKey = @import("extraction/graph_cache.zig").GraphCacheKey;
 pub const ExtractionOptions = @import("extraction/extraction_options.zig").ExtractionOptions;
+pub const WorkspaceMode = @import("extraction/extraction_options.zig").WorkspaceMode;
+pub const WorkspaceOptions = @import("extraction/extraction_options.zig").WorkspaceOptions;
+pub const WorkspacePackage = @import("extraction/extraction_options.zig").WorkspacePackage;
 pub const SourceReferences = @import("extraction/graph_normalizer.zig").SourceReferences;
 pub const ImportKind = @import("extraction/import_kind.zig").ImportKind;
 pub const ImportKinds = @import("extraction/import_kind.zig").ImportKinds;
@@ -69,4 +72,6 @@ test {
     _ = @import("extraction/source_files.zig");
     _ = @import("extraction/source_parser.zig");
     _ = @import("extraction/source_location.zig");
+    _ = @import("extraction/workspace.zig");
+    _ = @import("extraction/workspace_options.zig");
 }
