@@ -1,5 +1,7 @@
 # ArchUnitZig
 
+[![CI](https://github.com/LukasNiessen/ArchUnitZig/actions/workflows/ci.yml/badge.svg)](https://github.com/LukasNiessen/ArchUnitZig/actions/workflows/ci.yml)
+
 ArchUnitZig turns a Zig project into a dependency graph and lets you enforce architecture as
 ordinary `zig test` tests. Rules are lazy values: constructing a fluent chain performs no I/O;
 checking it returns structured violations or integrates with Zig's test runner.

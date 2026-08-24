@@ -1183,3 +1183,31 @@ duplicate branch-push and pull-request pair.
 Consequence: guide prose, public Zig examples, generated API documentation, site navigation, and
 deployment packaging fail one local/CI contract when they drift; the site stays maintainable and
 offline-readable; and a fork can prove documentation quality without being able to publish it.
+
+### D049 — CI verifies pinned binaries across three operating systems
+
+The supported CI toolchain is exactly Zig 0.16.0, downloaded from the versioned official Zig release
+URLs rather than a moving master build or an opaque setup action. A repository-owned standard-library
+Python installer maps the hosted runner's operating system and architecture to a closed manifest of
+Linux, macOS, and Windows archives. Every entry records the official byte size and SHA-256. Both are
+verified before a path-traversal-checked ZIP or TAR extraction, the installed binary must report the
+requested exact version, and unsupported versions or platforms fail closed. Unit tests exercise the
+manifest, verification, and extraction boundary without network access.
+
+All external GitHub Actions references use immutable commit SHAs with the reviewed stable release tag
+beside them. The workflow grants only `contents: read` globally. Pages write and OIDC permissions
+exist only on the canonical main-push deploy job, which depends on every compatibility and quality
+gate. Fork pull requests can build and upload the ordinary documentation artifact but cannot deploy.
+No dependency or build cache is configured; a future cache must include the Zig version plus relevant
+ZON hash or lock inputs in its key.
+
+Debug compatibility runs on current GitHub-hosted Linux, Windows, and macOS with `fail-fast` disabled,
+so one platform cannot conceal another platform's result. The Linux quality job explicitly checks
+formatting, runs the complete unit/acceptance/dogfood/README-consumer chain in `ReleaseSafe`, builds
+and validates the guide plus compiler API docs, and uploads their deployable artifact. Superseded
+runs for the same source repository and branch cancel through one normalized concurrency key; push
+and pull-request events may both start, but only the newest remains active.
+
+Consequence: toolchain downloads are reproducible and tamper-evident, allocator and path behavior are
+exercised on the three supported runner families, documentation cannot deploy ahead of code quality,
+and no optional matrix leg or `continue-on-error` can turn a red supported platform into a green PR.

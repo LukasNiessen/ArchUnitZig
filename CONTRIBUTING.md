@@ -20,6 +20,15 @@ the repository documentation records decisions that outlive an individual ticket
    zig build test
    ```
 
+   Documentation, public API, CI installer, and release-oriented changes also run:
+
+   ```console
+   python -B -m unittest scripts.test_install_zig
+   python -B scripts/check_ci.py
+   zig build test -Doptimize=ReleaseSafe
+   zig build docs -Doptimize=ReleaseSafe
+   ```
+
 5. Open a pull request that links the issue, explains Zig-specific trade-offs, and records the exact
    checks run.
 6. Review the complete diff and checks, merge the pull request, delete the branch, and return to a
@@ -51,3 +60,16 @@ README/license root commit is the one unavoidable exception to the pull-request 
 - [ ] `zig fmt --check` passes.
 - [ ] `zig build test` passes.
 - [ ] Documentation and decisions match the implementation.
+
+## Continuous integration
+
+CI runs Debug tests on current GitHub-hosted Linux, Windows, and macOS runners. A Linux quality job
+checks formatting, reruns the complete suite in `ReleaseSafe`, builds the documentation site and Zig
+API docs, and uploads the validated artifact. The complete test command includes unit tests,
+acceptance fixtures, executable dogfood rules, and the standalone README consumer.
+
+Zig 0.16.0 is installed by `scripts/install_zig.py` from exact official archive URLs. The script
+checks both the published byte size and SHA-256 before extraction. External workflow actions are
+pinned to immutable commits with their reviewed release tag in a comment. CI deliberately uses no
+dependency or build cache; adding one requires a key containing the Zig version and all relevant ZON
+hash/lock inputs.
