@@ -3,6 +3,7 @@ const std = @import("std");
 const common_path = @import("../../common/path.zig");
 const extraction = @import("../../common/extraction.zig");
 const mapped_edge = @import("../../common/projection/mapped_edge.zig");
+const matching = @import("../../common/matching.zig");
 const projected_edge = @import("../../common/projection/projected_edge.zig");
 const regex_module = @import("../../common/matching/regex.zig");
 
@@ -13,6 +14,7 @@ pub const MappedEdge = mapped_edge.MappedEdge;
 pub const ProjectedEdge = projected_edge.ProjectedEdge;
 pub const ProjectedEdges = projected_edge.ProjectedEdges;
 pub const Regex = regex_module.Regex;
+pub const Filter = matching.Filter;
 
 pub const InitError = Allocator.Error || Regex.CompileError || error{
     MissingSliceCapture,
@@ -234,7 +236,10 @@ fn mapEdge(
     allocator: Allocator,
     projection: *const SliceProjection,
     edge: *const Edge,
+    path_filter: ?*const Filter,
 ) ProjectionError!?OwnedMapping {
+    if (!try pathIncluded(allocator, path_filter, edge.source)) return null;
+    if (!edge.external and !try pathIncluded(allocator, path_filter, edge.target)) return null;
     const source_label = (try projection.labelFor(allocator, edge.source)) orelse return null;
     errdefer allocator.free(source_label);
     const target_label = if (edge.external)
@@ -259,10 +264,21 @@ pub fn projectSliceEdges(
     graph: *const Graph,
     slice_projection: *const SliceProjection,
 ) ProjectionError!ProjectedEdges {
+    return projectSliceEdgesFiltered(allocator, graph, slice_projection, null);
+}
+
+/// Applies one slice projection after filtering internal source and target paths. External targets
+/// remain graph identifiers; only their internal source path is filtered.
+pub fn projectSliceEdgesFiltered(
+    allocator: Allocator,
+    graph: *const Graph,
+    slice_projection: *const SliceProjection,
+    path_filter: ?*const Filter,
+) ProjectionError!ProjectedEdges {
     var result: ProjectedEdges = .{};
     errdefer result.deinit(allocator);
     for (graph.items()) |*raw_edge| {
-        var mapped = (try mapEdge(allocator, slice_projection, raw_edge)) orelse continue;
+        var mapped = (try mapEdge(allocator, slice_projection, raw_edge, path_filter)) orelse continue;
         defer mapped.deinit(allocator);
         const borrowed = mapped.borrowed();
         try borrowed.validate();
@@ -336,16 +352,39 @@ pub fn projectSliceLabels(
     graph: *const Graph,
     slice_projection: *const SliceProjection,
 ) LabelError!SliceLabels {
+    return projectSliceLabelsFiltered(allocator, graph, slice_projection, null);
+}
+
+pub fn projectSliceLabelsFiltered(
+    allocator: Allocator,
+    graph: *const Graph,
+    slice_projection: *const SliceProjection,
+    path_filter: ?*const Filter,
+) LabelError!SliceLabels {
     var result: SliceLabels = .{};
     errdefer result.deinit(allocator);
     for (graph.items()) |edge| {
-        try result.appendOwnedUnique(allocator, try slice_projection.labelFor(allocator, edge.source));
-        if (!edge.external) {
+        if (try pathIncluded(allocator, path_filter, edge.source)) {
+            try result.appendOwnedUnique(allocator, try slice_projection.labelFor(allocator, edge.source));
+        }
+        if (!edge.external and try pathIncluded(allocator, path_filter, edge.target)) {
             try result.appendOwnedUnique(allocator, try slice_projection.labelFor(allocator, edge.target));
         }
     }
     result.sort();
     return result;
+}
+
+fn pathIncluded(
+    allocator: Allocator,
+    path_filter: ?*const Filter,
+    path: []const u8,
+) LabelError!bool {
+    const filter = path_filter orelse return true;
+    return filter.matches(allocator, .{ .path = path }) catch |failure| switch (failure) {
+        error.MissingDeclarationName => unreachable,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 }
 
 fn compileCapturePattern(allocator: Allocator, pattern: []const u8) InitError!Regex {

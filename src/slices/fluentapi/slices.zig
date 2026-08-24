@@ -4,6 +4,7 @@ const assertion = @import("../../common/assertion.zig");
 const common_error = @import("../../common/error.zig");
 const extraction = @import("../../common/extraction.zig");
 const fluentapi = @import("../../common/fluentapi.zig");
+const matching = @import("../../common/matching.zig");
 const diagram_assertion = @import("../assertion/diagram_adherence.zig");
 const slice_assertion = @import("../assertion/slice_dependency.zig");
 const slice_projection = @import("../projection/slice_projection.zig");
@@ -13,11 +14,16 @@ const Allocator = std.mem.Allocator;
 pub const CheckOptions = fluentapi.CheckOptions;
 pub const Graph = extraction.Graph;
 pub const Mood = assertion.Mood;
+pub const Pattern = matching.Pattern;
+pub const PatternTarget = matching.PatternTarget;
 pub const SliceProjection = slice_projection.SliceProjection;
 pub const SliceSuffix = slice_projection.SliceSuffix;
 pub const DiagramAdherenceOptions = diagram_assertion.DiagramAdherenceOptions;
 
 pub const BuilderError = slice_projection.InitError || error{
+    ExclusionWithoutSelector,
+    InvalidExclusionTarget,
+    InvalidPattern,
     InvalidProjectPath,
     EmptySliceLabel,
     InvalidDiagram,
@@ -32,6 +38,9 @@ pub const ProjectSlices = struct {
     allocator: Allocator,
     project_locator: ?[]u8,
     projection: SliceProjection,
+    path_filter: ?matching.Filter = null,
+    exclusion_target: ?PatternTarget = null,
+    exclusions: std.ArrayList(assertion.ScopePattern) = .empty,
 
     fn init(allocator: Allocator, options: ProjectSliceOptions) BuilderError!ProjectSlices {
         if (options.locator) |locator| {
@@ -46,17 +55,30 @@ pub const ProjectSlices = struct {
 
     pub fn clone(self: *const ProjectSlices) BuilderError!ProjectSlices {
         const locator = if (self.project_locator) |value| try self.allocator.dupe(u8, value) else null;
-        errdefer if (locator) |value| self.allocator.free(value);
-        return .{
+        var locator_owned = true;
+        errdefer if (locator_owned) if (locator) |value| self.allocator.free(value);
+        var result = ProjectSlices{
             .allocator = self.allocator,
             .project_locator = locator,
             .projection = try self.projection.clone(self.allocator),
+            .exclusion_target = self.exclusion_target,
         };
+        locator_owned = false;
+        errdefer result.deinit();
+        if (self.path_filter) |*filter| result.path_filter = try filter.clone(self.allocator);
+        try result.exclusions.ensureTotalCapacity(self.allocator, self.exclusions.items.len);
+        for (self.exclusions.items) |exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(self.allocator));
+        }
+        return result;
     }
 
     pub fn deinit(self: *ProjectSlices) void {
         if (self.project_locator) |locator| self.allocator.free(locator);
         self.projection.deinit(self.allocator);
+        if (self.path_filter) |*filter| filter.deinit();
+        for (self.exclusions.items) |*exclusion| exclusion.deinit(self.allocator);
+        self.exclusions.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -64,7 +86,7 @@ pub const ProjectSlices = struct {
     pub fn definedBy(self: *const ProjectSlices, pattern: []const u8) BuilderError!ProjectSlices {
         var next_projection = try SliceProjection.initPattern(self.allocator, pattern);
         errdefer next_projection.deinit(self.allocator);
-        return self.withProjection(&next_projection);
+        return self.withProjection(&next_projection, .path);
     }
 
     /// Replaces the current projection with an explicit regex using capture group 1.
@@ -74,7 +96,7 @@ pub const ProjectSlices = struct {
     ) BuilderError!ProjectSlices {
         var next_projection = try SliceProjection.initRegex(self.allocator, expression);
         errdefer next_projection.deinit(self.allocator);
-        return self.withProjection(&next_projection);
+        return self.withProjection(&next_projection, .path);
     }
 
     /// Replaces the current projection with deterministic file-stem suffix definitions.
@@ -84,18 +106,100 @@ pub const ProjectSlices = struct {
     ) BuilderError!ProjectSlices {
         var next_projection = try SliceProjection.initFileSuffixes(self.allocator, definitions);
         errdefer next_projection.deinit(self.allocator);
-        return self.withProjection(&next_projection);
+        return self.withProjection(&next_projection, .filename);
     }
 
     fn withProjection(
         self: *const ProjectSlices,
         next_projection: *SliceProjection,
+        target: PatternTarget,
     ) BuilderError!ProjectSlices {
+        var next_filter = try matching.Filter.init(
+            self.allocator,
+            .{ .glob = "**" },
+            .path,
+            .exact,
+        );
+        errdefer next_filter.deinit();
         var result = try self.clone();
+        errdefer result.deinit();
         result.projection.deinit(result.allocator);
         result.projection = next_projection.*;
         next_projection.* = undefined;
+        if (result.path_filter) |*filter| filter.deinit();
+        result.path_filter = next_filter;
+        next_filter = undefined;
+        for (result.exclusions.items) |*exclusion| exclusion.deinit(result.allocator);
+        result.exclusions.clearRetainingCapacity();
+        result.exclusion_target = target;
         return result;
+    }
+
+    pub fn except(self: *const ProjectSlices, patterns: []const Pattern) BuilderError!ProjectSlices {
+        return self.excludePatterns(patterns, self.exclusion_target orelse return error.ExclusionWithoutSelector);
+    }
+
+    pub fn exceptTargeted(
+        self: *const ProjectSlices,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!ProjectSlices {
+        if (self.exclusion_target == null) return error.ExclusionWithoutSelector;
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        return self.excludePatterns(patterns, target);
+    }
+
+    fn excludePatterns(
+        self: *const ProjectSlices,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!ProjectSlices {
+        if (patterns.len == 0) return error.InvalidPattern;
+        var result = try self.clone();
+        errdefer result.deinit();
+        try result.exclusions.ensureUnusedCapacity(result.allocator, patterns.len);
+        for (patterns) |pattern| {
+            if (pattern.source().len == 0) return error.InvalidPattern;
+            const mode: matching.MatchingMode = switch (pattern) {
+                .glob => .exact,
+                .regex => .partial,
+            };
+            try result.path_filter.?.addExclusion(pattern, target, mode);
+            result.exclusions.appendAssumeCapacity(try assertion.ScopePattern.initExclusion(
+                result.allocator,
+                0,
+                pattern,
+                target,
+                mode,
+            ));
+        }
+        return result;
+    }
+
+    fn projectLabels(
+        self: *const ProjectSlices,
+        allocator: Allocator,
+        graph: *const Graph,
+    ) slice_projection.LabelError!slice_projection.SliceLabels {
+        return slice_projection.projectSliceLabelsFiltered(
+            allocator,
+            graph,
+            &self.projection,
+            if (self.path_filter) |*filter| filter else null,
+        );
+    }
+
+    fn projectEdges(
+        self: *const ProjectSlices,
+        allocator: Allocator,
+        graph: *const Graph,
+    ) slice_projection.ProjectionError!slice_projection.ProjectedEdges {
+        return slice_projection.projectSliceEdgesFiltered(
+            allocator,
+            graph,
+            &self.projection,
+            if (self.path_filter) |*filter| filter else null,
+        );
     }
 
     pub fn should(self: *const ProjectSlices) BuilderError!SlicesShould {
@@ -128,9 +232,9 @@ pub const ProjectSlices = struct {
         allocator: Allocator,
         graph: *const Graph,
     ) (slice_projection.ProjectionError || plantuml.RenderError)![]u8 {
-        var labels = try slice_projection.projectSliceLabels(allocator, graph, &self.projection);
+        var labels = try self.projectLabels(allocator, graph);
         defer labels.deinit(allocator);
-        var edges = try slice_projection.projectSliceEdges(allocator, graph, &self.projection);
+        var edges = try self.projectEdges(allocator, graph);
         defer edges.deinit(allocator);
         return plantuml.renderPlantUml(allocator, labels.items(), edges.items());
     }
@@ -152,9 +256,9 @@ pub const ProjectSlices = struct {
             &diagnostics,
         );
         defer graph.deinit(options.allocator);
-        var labels = try slice_projection.projectSliceLabels(options.allocator, &graph, &self.projection);
+        var labels = try self.projectLabels(options.allocator, &graph);
         defer labels.deinit(options.allocator);
-        var edges = try slice_projection.projectSliceEdges(options.allocator, &graph, &self.projection);
+        var edges = try self.projectEdges(options.allocator, &graph);
         defer edges.deinit(options.allocator);
         return plantuml.exportPlantUml(
             options.allocator,
@@ -166,20 +270,33 @@ pub const ProjectSlices = struct {
     }
 
     fn description(self: *const ProjectSlices, allocator: Allocator) Allocator.Error![]u8 {
-        return switch (self.projection) {
-            .identity => allocator.dupe(u8, "project slices defined by file identity"),
-            .pattern => |value| std.fmt.allocPrint(
-                allocator,
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        switch (self.projection) {
+            .identity => output.writer.writeAll("project slices defined by file identity") catch
+                return error.OutOfMemory,
+            .pattern => |value| output.writer.print(
                 "project slices defined by pattern \"{f}\"",
                 .{std.zig.fmtString(value.source)},
-            ),
-            .regex => |value| std.fmt.allocPrint(
-                allocator,
+            ) catch return error.OutOfMemory,
+            .regex => |value| output.writer.print(
                 "project slices defined by regex \"{f}\"",
                 .{std.zig.fmtString(value.source)},
-            ),
-            .suffix => allocator.dupe(u8, "project slices defined by file suffix"),
-        };
+            ) catch return error.OutOfMemory,
+            .suffix => output.writer.writeAll("project slices defined by file suffix") catch
+                return error.OutOfMemory,
+        }
+        for (self.exclusions.items) |exclusion| {
+            output.writer.print(
+                ", except {s} {s}\"{f}\"",
+                .{
+                    exclusionTargetPhrase(exclusion.target),
+                    if (exclusion.syntax == .regex) "regex " else "",
+                    std.zig.fmtString(exclusion.expression),
+                },
+            ) catch return error.OutOfMemory;
+        }
+        return output.toOwnedSlice();
     }
 };
 
@@ -366,11 +483,7 @@ pub const DiagramAdherenceRule = struct {
         options: CheckOptions,
         graph: *const Graph,
     ) anyerror!assertion.ViolationList {
-        var labels = try slice_projection.projectSliceLabels(
-            options.allocator,
-            graph,
-            &self.rule.scope.projection,
-        );
+        var labels = try self.rule.scope.projectLabels(options.allocator, graph);
         defer labels.deinit(options.allocator);
         if (try assertion.guardEmptyTest(
             options.allocator,
@@ -406,11 +519,7 @@ pub const DiagramAdherenceRule = struct {
             .diagram => |*value| value,
             .invalid => return error.InvalidDiagram,
         };
-        var edges = try slice_projection.projectSliceEdges(
-            options.allocator,
-            graph,
-            &self.rule.scope.projection,
-        );
+        var edges = try self.rule.scope.projectEdges(options.allocator, graph);
         defer edges.deinit(options.allocator);
         return diagram_assertion.gatherDiagramAdherenceViolations(
             options.allocator,
@@ -499,11 +608,7 @@ pub const SliceDependencyRule = struct {
         options: CheckOptions,
         graph: *const Graph,
     ) anyerror!assertion.ViolationList {
-        var labels = try slice_projection.projectSliceLabels(
-            options.allocator,
-            graph,
-            &self.rule.scope.projection,
-        );
+        var labels = try self.rule.scope.projectLabels(options.allocator, graph);
         defer labels.deinit(options.allocator);
         if (try assertion.guardEmptyTest(
             options.allocator,
@@ -514,11 +619,7 @@ pub const SliceDependencyRule = struct {
             self.rule.mood,
         )) |early| return early;
 
-        var edges = try slice_projection.projectSliceEdges(
-            options.allocator,
-            graph,
-            &self.rule.scope.projection,
-        );
+        var edges = try self.rule.scope.projectEdges(options.allocator, graph);
         defer edges.deinit(options.allocator);
         return slice_assertion.gatherSliceDependencyViolations(
             options.allocator,
@@ -539,6 +640,15 @@ pub fn projectSlices(
 
 pub fn slices(allocator: Allocator, options: ProjectSliceOptions) BuilderError!ProjectSlices {
     return projectSlices(allocator, options);
+}
+
+fn exclusionTargetPhrase(target: PatternTarget) []const u8 {
+    return switch (target) {
+        .filename => "with name",
+        .path_without_filename => "in folder",
+        .path => "in path",
+        .declaration_name => unreachable,
+    };
 }
 
 fn containsNonWhitespace(value: []const u8) bool {
@@ -603,6 +713,73 @@ test "slice builders are lazy branchable and expose pattern regex and suffix pro
 
     try std.testing.expectError(error.InvalidProjectPath, projectSlices(std.testing.allocator, .{ .locator = " " }));
     try std.testing.expectError(error.MissingSliceCapture, base.definedBy("src/**"));
+}
+
+test "slice exclusions remove internal labels and dependency endpoints before projection" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var base = try projectSlices(std.testing.allocator, .{});
+    defer base.deinit();
+    try std.testing.expectError(error.ExclusionWithoutSelector, base.except(&.{.{ .glob = "generated/**" }}));
+    var scope = try base.definedBy("src/features/(**)/");
+    defer scope.deinit();
+    var without_retrieval = try scope.except(&.{.{ .glob = "src/features/retrieval/**" }});
+    defer without_retrieval.deinit();
+    var production = try without_retrieval.exceptTargeted(
+        &.{.{ .regex = "^worker\\.zig$" }},
+        .filename,
+    );
+    defer production.deinit();
+
+    var labels = try production.projectLabels(std.testing.allocator, &graph);
+    defer labels.deinit(std.testing.allocator);
+    try std.testing.expect(labels.contains("api"));
+    try std.testing.expect(labels.contains("orphan"));
+    try std.testing.expect(!labels.contains("retrieval"));
+    try std.testing.expect(!labels.contains("services"));
+    var edges = try production.projectEdges(std.testing.allocator, &graph);
+    defer edges.deinit(std.testing.allocator);
+    try std.testing.expect(edges.find("api", "retrieval") == null);
+    try std.testing.expect(edges.find("api", "services") == null);
+    try std.testing.expect(edges.find("api", "std") != null);
+
+    const description = try production.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings(
+        "project slices defined by pattern \"src/features/(**)/\", except in path \"src/features/retrieval/**\", except with name regex \"^worker\\\\.zig$\"",
+        description,
+    );
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        scope.exceptTargeted(&.{.{ .glob = "Worker" }}, .declaration_name),
+    );
+
+    var replaced = try production.definedByRegex("src/features/([^/]+)/");
+    defer replaced.deinit();
+    var replaced_labels = try replaced.projectLabels(std.testing.allocator, &graph);
+    defer replaced_labels.deinit(std.testing.allocator);
+    try std.testing.expect(replaced_labels.contains("retrieval"));
+    try std.testing.expect(replaced_labels.contains("services"));
+}
+
+test "slice suffix exclusions inherit the filename target" {
+    var graph = try sampleGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var base = try projectSlices(std.testing.allocator, .{});
+    defer base.deinit();
+    var suffix = try base.definedByFileSuffixes(&.{.{ .suffix = "repository", .label = "repositories" }});
+    defer suffix.deinit();
+    var excluded = try suffix.except(&.{.{ .glob = "repository.zig" }});
+    defer excluded.deinit();
+    var labels = try excluded.projectLabels(std.testing.allocator, &graph);
+    defer labels.deinit(std.testing.allocator);
+    try std.testing.expect(!labels.contains("repositories"));
+    const description = try excluded.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings(
+        "project slices defined by file suffix, except with name \"repository.zig\"",
+        description,
+    );
 }
 
 test "both moods evaluate direct internal and external slice dependencies" {
@@ -709,6 +886,27 @@ test "feature-sliced fixture exposes isolated allowed forbidden and external com
     var result = try forbidden.check(options);
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), result.items().len);
+}
+
+test "slice exclusions change real fixture rules and PlantUML consistently" {
+    var base = try projectSlices(std.testing.allocator, .{ .locator = "test/fixtures/slices-basic" });
+    defer base.deinit();
+    var scope = try base.definedBy("src/features/(**)/");
+    defer scope.deinit();
+    var without_retrieval = try scope.except(&.{.{ .glob = "src/features/retrieval/**" }});
+    defer without_retrieval.deinit();
+    var negative = try without_retrieval.shouldNot();
+    defer negative.deinit();
+    var forbidden = try negative.containDependency("api", "retrieval");
+    defer forbidden.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var result = try forbidden.check(options);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.passes());
+    const diagram = try without_retrieval.toPlantUml(options);
+    defer std.testing.allocator.free(diagram);
+    try std.testing.expect(std.mem.indexOf(u8, diagram, "retrieval") == null);
 }
 
 test "strict inline PlantUML reports unexpected actual and missing declared relationships" {
@@ -908,7 +1106,11 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer base.deinit();
     var scope = try base.definedByRegex("src/features/([^/]+)/");
     defer scope.deinit();
-    var negative = try scope.shouldNot();
+    var filtered = try scope.except(&.{.{ .glob = "src/features/generated/**" }});
+    defer filtered.deinit();
+    var production = try filtered.exceptTargeted(&.{.{ .regex = "_generated\\.zig$" }}, .filename);
+    defer production.deinit();
+    var negative = try production.shouldNot();
     defer negative.deinit();
     var rule = try negative.containDependency("api", "retrieval");
     defer rule.deinit(allocator);
