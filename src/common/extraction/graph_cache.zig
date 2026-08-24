@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const archignore = @import("archignore.zig");
 const common_error = @import("../error.zig");
 const common_path = @import("../path.zig");
 const extraction_options = @import("extraction_options.zig");
@@ -12,7 +13,7 @@ pub const BuildGraphMode = extraction_options.BuildGraphMode;
 pub const ExtractionOptions = extraction_options.ExtractionOptions;
 pub const Graph = graph_module.Graph;
 
-const cache_key_schema_version: u64 = 2;
+const cache_key_schema_version: u64 = 3;
 const keyed_option_fields = [_][]const u8{
     "exclusions",
     "strictness",
@@ -53,31 +54,80 @@ pub fn buildGraphCacheKey(
     options: ExtractionOptions,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!GraphCacheKey {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    var root_policy = try archignore.load(allocator, io, canonical_root, diagnostics);
+    defer root_policy.deinit(allocator);
+    return buildCanonicalGraphCacheKey(
+        allocator,
+        canonical_root,
+        options,
+        &root_policy,
+        diagnostics,
+    );
+}
+
+/// Coherent extraction entry point: encodes the exact policy snapshot used by source enumeration.
+pub fn buildGraphCacheKeyWithArchIgnore(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!GraphCacheKey {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    return buildCanonicalGraphCacheKey(
+        allocator,
+        canonical_root,
+        options,
+        root_policy,
+        diagnostics,
+    );
+}
+
+fn canonicalProjectRoot(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError![:0]u8 {
     if (project_root.len == 0) {
         return diagnostics.failUser(.invalid_project_path, "graph_cache.build_key", project_root, null);
     }
     const canonical_root = std.Io.Dir.cwd().realPathFileAlloc(io, project_root, allocator) catch |failure| {
         return mapRootFailure(diagnostics, project_root, failure);
     };
-    defer allocator.free(canonical_root);
+    errdefer allocator.free(canonical_root);
     const root_stat = std.Io.Dir.cwd().statFile(io, canonical_root, .{}) catch |failure| {
         return mapRootFailure(diagnostics, project_root, failure);
     };
     if (root_stat.kind != .directory) {
         return diagnostics.failUser(.invalid_project_path, "graph_cache.build_key", project_root, error.NotDir);
     }
+    return canonical_root;
+}
+
+fn buildCanonicalGraphCacheKey(
+    allocator: Allocator,
+    canonical_root: []const u8,
+    options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *common_error.ErrorContext,
+) common_error.ArchUnitError!GraphCacheKey {
     const normalized_root = common_path.normalize(allocator, canonical_root) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     defer allocator.free(normalized_root);
 
     var encoded: std.ArrayList(u8) = .empty;
     errdefer encoded.deinit(allocator);
-    appendKey(allocator, &encoded, normalized_root, options) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+    appendKey(allocator, &encoded, normalized_root, options, root_policy) catch {
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     const bytes = encoded.toOwnedSlice(allocator) catch {
-        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", project_root, error.OutOfMemory);
+        return diagnostics.failTechnical(.out_of_memory, "graph_cache.build_key", canonical_root, error.OutOfMemory);
     };
     return .{ .bytes = bytes, .hash_value = std.hash.Wyhash.hash(0, bytes) };
 }
@@ -87,9 +137,13 @@ fn appendKey(
     encoded: *std.ArrayList(u8),
     canonical_root: []const u8,
     options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
 ) Allocator.Error!void {
     try appendU64(allocator, encoded, cache_key_schema_version);
     try appendString(allocator, encoded, canonical_root);
+    try appendString(allocator, encoded, root_policy.path);
+    try encoded.append(allocator, @intFromBool(root_policy.present));
+    try appendString(allocator, encoded, &root_policy.fingerprint);
     try appendU64(allocator, encoded, @intFromEnum(options.strictness));
     try encoded.append(allocator, @intFromBool(options.include_resources));
     try encoded.append(allocator, @intFromBool(options.include_c_imports));

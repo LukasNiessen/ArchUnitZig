@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const archignore = @import("archignore.zig");
 const classifier = @import("classifier.zig");
 const common_error = @import("../error.zig");
 const extraction_options = @import("extraction_options.zig");
@@ -95,16 +96,19 @@ fn extractProjectGraphObserved(
         diagnostics,
     );
     defer project.deinit(allocator);
+    var root_policy = try archignore.load(allocator, io, project.path, diagnostics);
+    defer root_policy.deinit(allocator);
 
     if (clear_cache) {
         graph_cache.clearGraphCache();
         try logger.logCache("cache cleared");
     }
-    var cache_key = try graph_cache.buildGraphCacheKey(
+    var cache_key = try graph_cache.buildGraphCacheKeyWithArchIgnore(
         allocator,
         io,
         project.path,
         options,
+        &root_policy,
         diagnostics,
     );
     defer cache_key.deinit(allocator);
@@ -117,7 +121,14 @@ fn extractProjectGraphObserved(
     }
     try logger.logCache("cache miss");
 
-    var graph = try extractLocatedGraph(allocator, io, project.path, options, diagnostics);
+    var graph = try extractLocatedGraph(
+        allocator,
+        io,
+        project.path,
+        options,
+        &root_policy,
+        diagnostics,
+    );
     errdefer graph.deinit(allocator);
     graph_cache.storeGraphInCache(cache_key, graph) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_put", project.path, error.OutOfMemory);
@@ -136,13 +147,15 @@ fn extractLocatedGraph(
     io: Io,
     project_root: []const u8,
     options: ExtractionOptions,
+    root_policy: *const archignore.ArchIgnore,
     diagnostics: *common_error.ErrorContext,
 ) common_error.ArchUnitError!Graph {
-    var files = try source_files.enumerateSourceFiles(
+    var files = try source_files.enumerateSourceFilesWithArchIgnore(
         allocator,
         io,
         project_root,
         .{ .exclusions = options.exclusions },
+        root_policy,
         diagnostics,
     );
     defer files.deinit(allocator);

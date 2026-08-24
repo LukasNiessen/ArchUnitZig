@@ -52,6 +52,7 @@ pub const locateProject = @import("extraction/project_locator.zig").locateProjec
 
 test {
     _ = @import("path.zig");
+    _ = @import("extraction/archignore.zig");
     _ = @import("extraction/classifier.zig");
     _ = @import("extraction/edge.zig");
     _ = @import("extraction/extraction_options.zig");

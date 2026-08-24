@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const archignore = @import("archignore.zig");
 const common_error = @import("../error.zig");
 const common_path = @import("../path.zig");
 const matching = @import("../matching.zig");
@@ -43,6 +44,48 @@ pub fn enumerateSourceFiles(
     options: EnumerationOptions,
     diagnostics: *ErrorContext,
 ) common_error.ArchUnitError!SourceFiles {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    var root_policy = try archignore.load(allocator, io, canonical_root, diagnostics);
+    defer root_policy.deinit(allocator);
+    return enumerateCanonicalSourceFiles(
+        allocator,
+        io,
+        canonical_root,
+        options,
+        &root_policy,
+        diagnostics,
+    );
+}
+
+/// Coherent extraction entry point: the caller supplies the exact root policy snapshot already
+/// encoded into its graph-cache key.
+pub fn enumerateSourceFilesWithArchIgnore(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    options: EnumerationOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *ErrorContext,
+) common_error.ArchUnitError!SourceFiles {
+    const canonical_root = try canonicalProjectRoot(allocator, io, project_root, diagnostics);
+    defer allocator.free(canonical_root);
+    return enumerateCanonicalSourceFiles(
+        allocator,
+        io,
+        canonical_root,
+        options,
+        root_policy,
+        diagnostics,
+    );
+}
+
+fn canonicalProjectRoot(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    diagnostics: *ErrorContext,
+) common_error.ArchUnitError![:0]u8 {
     if (project_root.len == 0) {
         return diagnostics.failUser(.invalid_project_path, "project.enumerate", project_root, null);
     }
@@ -50,17 +93,41 @@ pub fn enumerateSourceFiles(
     const canonical_root = std.Io.Dir.cwd().realPathFileAlloc(io, project_root, allocator) catch |failure| {
         return mapEnumerationFailure(diagnostics, project_root, failure);
     };
-    defer allocator.free(canonical_root);
+    errdefer allocator.free(canonical_root);
     const stat = std.Io.Dir.cwd().statFile(io, canonical_root, .{}) catch |failure| {
         return mapEnumerationFailure(diagnostics, project_root, failure);
     };
     if (stat.kind != .directory) {
         return diagnostics.failUser(.invalid_project_path, "project.enumerate", project_root, error.NotDir);
     }
+    return canonical_root;
+}
 
-    var exclusions = compileExclusions(allocator, options.exclusions, diagnostics) catch |failure| {
-        return failure;
+fn enumerateCanonicalSourceFiles(
+    allocator: Allocator,
+    io: Io,
+    canonical_root: []const u8,
+    options: EnumerationOptions,
+    root_policy: *const archignore.ArchIgnore,
+    diagnostics: *ErrorContext,
+) common_error.ArchUnitError!SourceFiles {
+    var combined_patterns: std.ArrayList([]const u8) = .empty;
+    defer combined_patterns.deinit(allocator);
+    combined_patterns.ensureTotalCapacity(
+        allocator,
+        options.exclusions.len + root_policy.patterns().len,
+    ) catch {
+        return diagnostics.failTechnical(
+            .out_of_memory,
+            "project.compile_exclusion",
+            root_policy.path,
+            error.OutOfMemory,
+        );
     };
+    combined_patterns.appendSliceAssumeCapacity(options.exclusions);
+    combined_patterns.appendSliceAssumeCapacity(root_policy.patterns());
+
+    var exclusions = try compileExclusions(allocator, combined_patterns.items, diagnostics);
     defer {
         for (exclusions.items) |*filter| filter.deinit();
         exclusions.deinit(allocator);
@@ -69,17 +136,17 @@ pub fn enumerateSourceFiles(
     var root_dir = std.Io.Dir.openDirAbsolute(io, canonical_root, .{
         .iterate = true,
         .follow_symlinks = false,
-    }) catch |failure| return mapEnumerationFailure(diagnostics, project_root, failure);
+    }) catch |failure| return mapEnumerationFailure(diagnostics, canonical_root, failure);
     defer root_dir.close(io);
     var walker = root_dir.walkSelectively(allocator) catch {
-        return diagnostics.failTechnical(.out_of_memory, "project.enumerate", project_root, error.OutOfMemory);
+        return diagnostics.failTechnical(.out_of_memory, "project.enumerate", canonical_root, error.OutOfMemory);
     };
     defer walker.deinit();
 
     var result = SourceFiles{};
     errdefer result.deinit(allocator);
     while (walker.next(io) catch |failure| {
-        return mapEnumerationFailure(diagnostics, project_root, failure);
+        return mapEnumerationFailure(diagnostics, canonical_root, failure);
     }) |entry| {
         const relative = common_path.normalize(allocator, entry.path) catch {
             return diagnostics.failTechnical(.out_of_memory, "project.enumerate", entry.path, error.OutOfMemory);
