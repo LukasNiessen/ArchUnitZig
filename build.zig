@@ -69,12 +69,43 @@ pub fn build(b: *std.Build) void {
     const run_dogfood_tests = b.addRunArtifact(dogfood_tests);
     run_dogfood_tests.setCwd(b.path("."));
 
+    const readme_fixture = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "build",
+        "test",
+        optimize_argument,
+        "--global-cache-dir",
+        acceptance_cache,
+    });
+    readme_fixture.setCwd(b.path("test/fixtures/readme-consumer"));
+    readme_fixture.setEnvironmentVariable("ZIG_GLOBAL_CACHE_DIR", acceptance_cache);
+    readme_fixture.step.dependOn(&run_dogfood_tests.step);
+
+    const readme = b.createModule(.{
+        .root_source_file = b.path("test/readme.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    readme.addImport("archunit", archunit);
+    const readme_tests = b.addTest(.{ .root_module = readme });
+    readme_tests.step.dependOn(&readme_fixture.step);
+    const run_readme_tests = b.addRunArtifact(readme_tests);
+    run_readme_tests.setCwd(b.path("test/fixtures/readme-consumer"));
+
     const format_check = b.addFmt(.{
-        .paths = &.{ "build.zig", "build.zig.zon", "src", "test/acceptance.zig", "test/dogfood.zig" },
+        .paths = &.{
+            "build.zig",
+            "build.zig.zon",
+            "src",
+            "test/acceptance.zig",
+            "test/dogfood.zig",
+            "test/readme.zig",
+            "test/readme",
+        },
         .check = true,
     });
 
     const test_step = b.step("test", "Run formatting checks and tests");
     test_step.dependOn(&format_check.step);
-    test_step.dependOn(&run_dogfood_tests.step);
+    test_step.dependOn(&run_readme_tests.step);
 }
