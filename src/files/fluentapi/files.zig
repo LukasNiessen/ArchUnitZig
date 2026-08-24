@@ -25,7 +25,9 @@ pub const CustomFilePredicate = custom_assertion.CustomFilePredicate;
 pub const ExternalModuleCategories = external_assertion.ExternalModuleCategories;
 
 pub const BuilderError = Allocator.Error || error{
+    ExclusionWithoutSelector,
     InvalidDescription,
+    InvalidExclusionTarget,
     InvalidPattern,
     InvalidProjectPath,
 };
@@ -121,24 +123,11 @@ const CompiledPattern = struct {
     }
 
     fn clone(self: *const CompiledPattern, allocator: Allocator) BuilderError!CompiledPattern {
-        return switch (self.evidence.syntax) {
-            .glob => initPattern(
-                allocator,
-                self.evidence.selector_index,
-                .{ .glob = self.evidence.expression },
-                self.evidence.target,
-            ),
-            .regex => initPattern(
-                allocator,
-                self.evidence.selector_index,
-                .{ .regex = self.evidence.expression },
-                self.evidence.target,
-            ),
-            .literal => initLiteral(
-                allocator,
-                self.evidence.selector_index,
-                self.evidence.expression,
-            ),
+        var filter = self.filter.clone(allocator) catch |failure| return mapPatternFailure(failure);
+        errdefer filter.deinit();
+        return .{
+            .evidence = try self.evidence.clone(allocator),
+            .filter = filter,
         };
     }
 
@@ -151,6 +140,7 @@ const CompiledPattern = struct {
 
 const Selector = struct {
     alternatives: std.ArrayList(CompiledPattern) = .empty,
+    exclusions: std.ArrayList(ScopePattern) = .empty,
 
     fn initPatterns(
         allocator: Allocator,
@@ -199,13 +189,49 @@ const Selector = struct {
         for (self.alternatives.items) |*alternative| {
             result.alternatives.appendAssumeCapacity(try alternative.clone(allocator));
         }
+        try result.exclusions.ensureTotalCapacity(allocator, self.exclusions.items.len);
+        for (self.exclusions.items) |exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(allocator));
+        }
         return result;
     }
 
     fn deinit(self: *Selector, allocator: Allocator) void {
         for (self.alternatives.items) |*alternative| alternative.deinit(allocator);
         self.alternatives.deinit(allocator);
+        for (self.exclusions.items) |*exclusion| exclusion.deinit(allocator);
+        self.exclusions.deinit(allocator);
         self.* = undefined;
+    }
+
+    fn inheritedTarget(self: *const Selector) PatternTarget {
+        return self.alternatives.items[0].evidence.target;
+    }
+
+    fn addExclusions(
+        self: *Selector,
+        allocator: Allocator,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!void {
+        if (patterns.len == 0) return error.InvalidPattern;
+        try self.exclusions.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            if (pattern.source().len == 0) return error.InvalidPattern;
+            const mode = matchingModeFor(pattern);
+            for (self.alternatives.items) |*alternative| {
+                alternative.filter.addExclusion(pattern, target, mode) catch |failure| {
+                    return mapPatternFailure(failure);
+                };
+            }
+            self.exclusions.appendAssumeCapacity(try ScopePattern.initExclusion(
+                allocator,
+                self.alternatives.items[0].evidence.selector_index,
+                pattern,
+                target,
+                mode,
+            ));
+        }
     }
 
     fn matches(self: *const Selector, allocator: Allocator, path: []const u8) Allocator.Error!bool {
@@ -287,11 +313,16 @@ pub const FilesScope = struct {
         var result: ScopePatterns = .{};
         errdefer result.deinit(allocator);
         var pattern_count: usize = 0;
-        for (self.selectors.items) |selector| pattern_count += selector.alternatives.items.len;
+        for (self.selectors.items) |selector| {
+            pattern_count += selector.alternatives.items.len + selector.exclusions.items.len;
+        }
         try result.values.ensureTotalCapacity(allocator, pattern_count);
         for (self.selectors.items) |selector| {
             for (selector.alternatives.items) |alternative| {
                 result.values.appendAssumeCapacity(try alternative.evidence.clone(allocator));
+            }
+            for (selector.exclusions.items) |exclusion| {
+                result.values.appendAssumeCapacity(try exclusion.clone(allocator));
             }
         }
         return result;
@@ -326,6 +357,20 @@ pub const FilesScope = struct {
             return error.OutOfMemory;
         };
         return result;
+    }
+
+    /// Excludes alternatives from the immediately preceding selector using that selector's target.
+    pub fn except(self: *const FilesScope, patterns: []const Pattern) BuilderError!FilesScope {
+        return self.excludePatterns(patterns, null);
+    }
+
+    /// Excludes alternatives from the immediately preceding selector using an explicit path field.
+    pub fn exceptTargeted(
+        self: *const FilesScope,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesScope {
+        return self.excludePatterns(patterns, target);
     }
 
     /// Purely evaluates this scope against one normalized project-relative path.
@@ -413,6 +458,24 @@ pub const FilesScope = struct {
         return result;
     }
 
+    fn excludePatterns(
+        self: *const FilesScope,
+        patterns: []const Pattern,
+        explicit_target: ?PatternTarget,
+    ) BuilderError!FilesScope {
+        if (self.selectors.items.len == 0) return error.ExclusionWithoutSelector;
+        const target = explicit_target orelse self.selectors.items[self.selectors.items.len - 1].inheritedTarget();
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        var result = try self.clone();
+        errdefer result.deinit();
+        try result.selectors.items[result.selectors.items.len - 1].addExclusions(
+            result.allocator,
+            patterns,
+            target,
+        );
+        return result;
+    }
+
     fn writeDescription(self: *const FilesScope, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll("project files");
         try self.writeSelectorDescription(writer);
@@ -432,6 +495,13 @@ pub const FilesScope = struct {
                 try writer.print("\"{f}\"", .{std.zig.fmtString(alternative.evidence.expression)});
             }
             if (alternatives.len > 1) try writer.writeByte(')');
+            for (selector.exclusions.items) |exclusion| {
+                try writer.writeAll(", except ");
+                try writer.writeAll(selectorPhrase(exclusion));
+                try writer.writeByte(' ');
+                if (exclusion.syntax == .regex) try writer.writeAll("regex ");
+                try writer.print("\"{f}\"", .{std.zig.fmtString(exclusion.expression)});
+            }
         }
     }
 };
@@ -764,6 +834,22 @@ pub const FilesDependOn = struct {
         return init(&self.rule, &narrowed);
     }
 
+    pub fn except(self: *const FilesDependOn, patterns: []const Pattern) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.except(patterns);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
+    pub fn exceptTargeted(
+        self: *const FilesDependOn,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesDependOn {
+        var narrowed = try self.objects.exceptTargeted(patterns, target);
+        defer narrowed.deinit();
+        return init(&self.rule, &narrowed);
+    }
+
     pub fn description(self: *const FilesDependOn, allocator: Allocator) Allocator.Error![]u8 {
         const prefix = try self.rule.description(allocator);
         defer allocator.free(prefix);
@@ -864,6 +950,7 @@ pub const FilesExternalModules = struct {
     rule: FileRuleContext,
     categories: ExternalModuleCategories,
     module_patterns: std.ArrayList(CompiledPattern) = .empty,
+    exclusions: std.ArrayList(ScopePattern) = .empty,
 
     fn init(
         source_rule: *const FileRuleContext,
@@ -885,6 +972,8 @@ pub const FilesExternalModules = struct {
         const owner = self.rule.scope.allocator;
         for (self.module_patterns.items) |*pattern| pattern.deinit(owner);
         self.module_patterns.deinit(owner);
+        for (self.exclusions.items) |*exclusion| exclusion.deinit(owner);
+        self.exclusions.deinit(owner);
         self.rule.deinit();
         self.* = undefined;
     }
@@ -902,6 +991,13 @@ pub const FilesExternalModules = struct {
         for (self.module_patterns.items) |*pattern| {
             result.module_patterns.appendAssumeCapacity(try pattern.clone(self.rule.scope.allocator));
         }
+        try result.exclusions.ensureTotalCapacity(
+            self.rule.scope.allocator,
+            self.exclusions.items.len,
+        );
+        for (self.exclusions.items) |exclusion| {
+            result.exclusions.appendAssumeCapacity(try exclusion.clone(self.rule.scope.allocator));
+        }
         return result;
     }
 
@@ -911,6 +1007,19 @@ pub const FilesExternalModules = struct {
         errdefer result.deinit(self.rule.scope.allocator);
         try result.appendPatterns(patterns);
         return result;
+    }
+
+    pub fn except(self: *const FilesExternalModules, patterns: []const Pattern) BuilderError!FilesExternalModules {
+        return self.excludePatterns(patterns, .path);
+    }
+
+    pub fn exceptTargeted(
+        self: *const FilesExternalModules,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesExternalModules {
+        if (target == .declaration_name) return error.InvalidExclusionTarget;
+        return self.excludePatterns(patterns, target);
     }
 
     pub fn includingCompilerModules(self: *const FilesExternalModules) BuilderError!FilesExternalModules {
@@ -947,6 +1056,35 @@ pub const FilesExternalModules = struct {
         }
     }
 
+    fn excludePatterns(
+        self: *const FilesExternalModules,
+        patterns: []const Pattern,
+        target: PatternTarget,
+    ) BuilderError!FilesExternalModules {
+        if (patterns.len == 0) return error.InvalidPattern;
+        var result = try self.clone();
+        errdefer result.deinit(self.rule.scope.allocator);
+        const allocator = result.rule.scope.allocator;
+        try result.exclusions.ensureUnusedCapacity(allocator, patterns.len);
+        for (patterns) |pattern| {
+            if (pattern.source().len == 0) return error.InvalidPattern;
+            const mode = matchingModeFor(pattern);
+            for (result.module_patterns.items) |*module_pattern| {
+                module_pattern.filter.addExclusion(pattern, target, mode) catch |failure| {
+                    return mapPatternFailure(failure);
+                };
+            }
+            result.exclusions.appendAssumeCapacity(try ScopePattern.initExclusion(
+                allocator,
+                0,
+                pattern,
+                target,
+                mode,
+            ));
+        }
+        return result;
+    }
+
     pub fn description(self: *const FilesExternalModules, allocator: Allocator) Allocator.Error![]u8 {
         const prefix = try self.rule.description(allocator);
         defer allocator.free(prefix);
@@ -961,6 +1099,12 @@ pub const FilesExternalModules = struct {
                 return error.OutOfMemory;
         }
         if (self.module_patterns.items.len > 1) output.writer.writeByte(')') catch return error.OutOfMemory;
+        for (self.exclusions.items) |exclusion| {
+            output.writer.print(", except {s} ", .{selectorPhrase(exclusion)}) catch return error.OutOfMemory;
+            if (exclusion.syntax == .regex) output.writer.writeAll("regex ") catch return error.OutOfMemory;
+            output.writer.print("\"{f}\"", .{std.zig.fmtString(exclusion.expression)}) catch
+                return error.OutOfMemory;
+        }
         return output.toOwnedSlice();
     }
 
@@ -999,6 +1143,7 @@ pub const FilesExternalModules = struct {
         if (self.rule.mood() == .should) {
             if (try guardCompiledPatternSelection(
                 self.module_patterns.items,
+                self.exclusions.items,
                 self.rule.mood(),
                 category_edges,
                 options,
@@ -1237,6 +1382,7 @@ fn guardScopeSelection(
 
 fn guardCompiledPatternSelection(
     patterns: []const CompiledPattern,
+    exclusions: []const ScopePattern,
     mood: Mood,
     matched_count: usize,
     options: CheckOptions,
@@ -1245,8 +1391,9 @@ fn guardCompiledPatternSelection(
     if (matched_count != 0) return null;
     var evidence = ScopePatterns{};
     defer evidence.deinit(options.allocator);
-    try evidence.values.ensureTotalCapacity(options.allocator, patterns.len);
+    try evidence.values.ensureTotalCapacity(options.allocator, patterns.len + exclusions.len);
     for (patterns) |pattern| evidence.values.appendAssumeCapacity(try pattern.evidence.clone(options.allocator));
+    for (exclusions) |exclusion| evidence.values.appendAssumeCapacity(try exclusion.clone(options.allocator));
     return assertion.guardEmptyTest(
         options.allocator,
         matched_count,
@@ -1325,6 +1472,68 @@ test "selector calls use AND while alternatives within one call use OR" {
     try std.testing.expect(try scope.matchesPath("src/domain/order.zig"));
     try std.testing.expect(!try scope.matchesPath("src/api/model.zig"));
     try std.testing.expect(!try scope.matchesPath("test/api/handler.zig"));
+}
+
+test "file selector exclusions inherit or explicitly target the immediately preceding selector" {
+    var entry = try projectFiles(std.testing.allocator, .{});
+    defer entry.deinit();
+    try std.testing.expectError(error.ExclusionWithoutSelector, entry.except(&.{.{ .glob = "generated/**" }}));
+
+    var source = try entry.inPath(&.{
+        .{ .glob = "src/**" },
+        .{ .glob = "test/**" },
+    });
+    defer source.deinit();
+    var without_generated = try source.except(&.{.{ .glob = "src/**/generated/**" }});
+    defer without_generated.deinit();
+    var without_tests = try without_generated.exceptTargeted(
+        &.{.{ .regex = "_test\\.zig$" }},
+        .filename,
+    );
+    defer without_tests.deinit();
+
+    try std.testing.expect(try without_tests.matchesPath("src/domain/order.zig"));
+    try std.testing.expect(!try without_tests.matchesPath("src/domain/generated/deep/model.zig"));
+    try std.testing.expect(!try without_tests.matchesPath("src/domain/order_test.zig"));
+    try std.testing.expect(try without_tests.matchesPath("test/helper.zig"));
+    try std.testing.expect(try source.matchesPath("src/domain/order_test.zig"));
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        source.exceptTargeted(&.{.{ .glob = "Legacy" }}, .declaration_name),
+    );
+
+    const description = try without_tests.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings(
+        "project files, in path (\"src/**\" or \"test/**\"), except in path \"src/**/generated/**\", except with name regex \"_test\\\\.zig$\"",
+        description,
+    );
+    var evidence = try without_tests.scopePatterns(std.testing.allocator);
+    defer evidence.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 4), evidence.len());
+    try std.testing.expect(!evidence.items()[1].is_exclusion);
+    try std.testing.expect(evidence.items()[2].is_exclusion);
+    try std.testing.expectEqual(PatternTarget.filename, evidence.items()[3].target);
+}
+
+test "real file selection omits explicit filename exclusions without changing the source branch" {
+    var entry = try projectFiles(std.testing.allocator, .{ .locator = "test/fixtures/files-selection" });
+    defer entry.deinit();
+    var source = try entry.inPath(&.{.{ .glob = "src/**" }});
+    defer source.deinit();
+    var production = try source.exceptTargeted(&.{.{ .glob = "*_test.zig" }}, .filename);
+    defer production.deinit();
+    var positive = try production.should();
+    defer positive.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    var graph = try extractRuleGraph(&positive.rule, options);
+    defer graph.deinit(std.testing.allocator);
+    var selected = try production.select(&graph);
+    defer selected.deinit();
+    try std.testing.expectEqual(@as(usize, 3), selected.len());
+    try std.testing.expect(!containsSelected(selected.items(), "src/domain/order_test.zig"));
+    try std.testing.expect(try source.matchesPath("src/domain/order_test.zig"));
 }
 
 test "filename folder path and exact-file selectors inspect distinct path facts" {
@@ -1818,6 +2027,36 @@ test "dependency object selection includes ZON targets and excludes external mod
     try std.testing.expect(!containsSelected(selected.items(), "std"));
 }
 
+test "dependency object exclusions qualify only the latest object selector" {
+    var graph = try dependencyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var rule = try dependencySubject(std.testing.allocator, .should);
+    defer rule.deinit();
+    var builder = FilesDependOnBuilder{ .rule = try rule.clone() };
+    defer builder.deinit();
+    var database = try builder.inPath(&.{.{ .glob = "src/database/**" }});
+    defer database.deinit(std.testing.allocator);
+    var only_root = try database.exceptTargeted(&.{.{ .glob = "model.zig" }}, .filename);
+    defer only_root.deinit(std.testing.allocator);
+    var config_too = try only_root.inFile(&.{"config.zon"});
+    defer config_too.deinit(std.testing.allocator);
+
+    var selected = try config_too.objects.selectDependencyObjects(&graph);
+    defer selected.deinit();
+    try std.testing.expectEqual(@as(usize, 0), selected.len());
+    try std.testing.expect(try only_root.objects.matchesPath("src/database/root.zig"));
+    try std.testing.expect(!try only_root.objects.matchesPath("src/database/model.zig"));
+    try std.testing.expect(try database.objects.matchesPath("src/database/model.zig"));
+
+    const description = try only_root.description(std.testing.allocator);
+    defer std.testing.allocator.free(description);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        description,
+        "depend on files, in path \"src/database/**\", except with name \"model.zig\"",
+    ) != null);
+}
+
 test "direct dependency allowlists and blocklists chain object selectors with grouped evidence" {
     var graph = try dependencyGraph(std.testing.allocator);
     defer graph.deinit(std.testing.allocator);
@@ -2131,6 +2370,47 @@ test "external module terminals OR repeated patterns and keep compiler modules o
     defer compiler_result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), compiler_result.items().len);
     try std.testing.expectEqualStrings("std", compiler_result.items()[0].external_module_dependency.items()[0].target_label);
+}
+
+test "external module exclusions use the shared filter and retain later OR alternatives" {
+    var graph = try externalPolicyGraph(std.testing.allocator);
+    defer graph.deinit(std.testing.allocator);
+    var rule = try externalSubject(std.testing.allocator, .should_not);
+    defer rule.deinit();
+    var builder = FilesExternalModuleBuilder{
+        .rule = try rule.clone(),
+        .categories = external_assertion.defaultExternalModuleCategories(),
+    };
+    defer builder.deinit();
+    var broad = try builder.matching(&.{.{ .regex = ".+" }});
+    defer broad.deinit(std.testing.allocator);
+    var without_telemetry = try broad.except(&.{.{ .glob = "telemetry" }});
+    defer without_telemetry.deinit(std.testing.allocator);
+    var telemetry_restored = try without_telemetry.matching(&.{.{ .glob = "telemetry" }});
+    defer telemetry_restored.deinit(std.testing.allocator);
+
+    var excluded = try without_telemetry.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer excluded.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), excluded.items().len);
+    try std.testing.expectEqual(@as(usize, 1), excluded.items()[0].external_module_dependency.items().len);
+    try std.testing.expectEqualStrings(
+        "http_client",
+        excluded.items()[0].external_module_dependency.items()[0].target_label,
+    );
+
+    var restored = try telemetry_restored.checkGraph(
+        CheckOptions.init(std.testing.allocator, std.testing.io),
+        &graph,
+    );
+    defer restored.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), restored.items()[0].external_module_dependency.items().len);
+    try std.testing.expectError(
+        error.InvalidExclusionTarget,
+        broad.exceptTargeted(&.{.{ .glob = "Legacy" }}, .declaration_name),
+    );
 }
 
 test "negative external absence passes while positive zero-candidate rules stay guarded" {
@@ -2803,9 +3083,11 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer base.deinit();
     var branch = try base.withName(&.{.{ .glob = "order*.zig" }});
     defer branch.deinit();
-    var positive = try branch.should();
+    var production = try branch.except(&.{.{ .regex = "_test\\.zig$" }});
+    defer production.deinit();
+    var positive = try production.should();
     defer positive.deinit();
-    var negated = try branch.shouldNot();
+    var negated = try production.shouldNot();
     defer negated.deinit();
     var selected = try positive.select(&graph);
     defer selected.deinit();
@@ -2813,7 +3095,7 @@ fn exerciseAllocationFailures(allocator: Allocator) !void {
     defer evidence.deinit(allocator);
     const description = try positive.description(allocator);
     defer allocator.free(description);
-    try std.testing.expectEqual(@as(usize, 2), selected.len());
+    try std.testing.expectEqual(@as(usize, 1), selected.len());
 }
 
 test "file scope construction branching and selection clean up every allocation failure" {
