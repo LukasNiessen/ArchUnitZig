@@ -12,9 +12,11 @@ pub const metricsToHtml = @import("reporting/html_renderer.zig").toHtml;
 pub const MetricsExportError = @import("reporting/export_support.zig").ExportError;
 pub const exportMetricsAsHtml = @import("reporting/export_support.zig").exportAsHtml;
 pub const resolveMetricsHtmlPath = @import("reporting/export_support.zig").resolveHtmlPath;
+pub const MetricsExporter = @import("reporting/exporter.zig").MetricsExporter;
 
 test {
     _ = @import("reporting/report_data.zig");
     _ = @import("reporting/html_renderer.zig");
     _ = @import("reporting/export_support.zig");
+    _ = @import("reporting/exporter.zig");
 }

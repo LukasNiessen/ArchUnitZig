@@ -153,6 +153,7 @@ pub const MetricsReportSectionKind = metric_rules.MetricsReportSectionKind;
 pub const MetricsExportOptions = metric_rules.MetricsExportOptions;
 pub const MetricsRenderError = metric_rules.MetricsRenderError;
 pub const MetricsExportError = metric_rules.MetricsExportError;
+pub const MetricsExporter = metric_rules.MetricsExporter;
 pub const MetricContainerKind = metric_rules.ContainerKind;
 pub const MetricDeclarationInfo = metric_rules.DeclarationInfo;
 pub const MetricDeclarationKind = metric_rules.DeclarationKind;
