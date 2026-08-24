@@ -17,5 +17,11 @@ hosted-CI regression tripwires, not microbenchmark promises or laptop-derived pr
 The evidence block records the hosted run used to choose them. Update it only from an uncached
 `ubuntu-latest` quality run, retaining enough headroom for normal shared-runner variance.
 
+The current runtime ceilings are rounded above 25 times the recorded green Linux baseline, with
+100–200 ms floors for filesystem stages too small for a useful ratio. The total ceiling is 20
+seconds. The 64 MiB caller-allocator ceiling is more than eleven times the recorded peak. These are
+coarse order-of-magnitude regression guards; changing fixture scale requires a new evidence run and
+budget review rather than silently widening them.
+
 The generated fixture is versioned in its directory name. Change that version whenever its shape or
 contents change, so stale files cannot silently influence a new benchmark definition.

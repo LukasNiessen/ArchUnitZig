@@ -49,6 +49,25 @@ const Evidence = struct {
     runner: []const u8,
     run_url: ?[]const u8,
     observed_commit: ?[]const u8,
+    baseline: ?Baseline = null,
+};
+
+const BaselineStages = struct {
+    enumeration_ns: u64,
+    source_loading_ns: u64,
+    tokenize_parse_ns: u64,
+    resolution_classification_ns: u64,
+    normalization_ns: u64,
+    projection_ns: u64,
+    first_check_ns: u64,
+    cached_checks_ns: u64,
+    cached_check_per_iteration_ns: u64,
+};
+
+const Baseline = struct {
+    total_duration_ns: u64,
+    peak_live_bytes: usize,
+    stages: BaselineStages,
 };
 
 const StageBudgets = struct {

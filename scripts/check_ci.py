@@ -42,7 +42,7 @@ def main() -> None:
         "zig build test -Doptimize=Debug",
         "zig build test -Doptimize=ReleaseSafe",
         "zig build docs -Doptimize=ReleaseSafe",
-        "zig build benchmark",
+        "zig build benchmark-check",
         "name: performance-results",
         "path: zig-out/benchmark/results.json",
         "pages: write",
