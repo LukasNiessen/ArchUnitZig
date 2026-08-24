@@ -134,6 +134,7 @@ pub const CountMetricSelection = metric_rules.CountMetricSelection;
 pub const MetricMeasurement = metric_rules.MetricMeasurement;
 pub const MetricMeasurements = metric_rules.MetricMeasurements;
 pub const MetricThresholdRule = metric_rules.MetricThresholdRule;
+pub const MetricPredicateRule = metric_rules.MetricPredicateRule;
 pub const DependencyMetricKind = metric_rules.DependencyMetricKind;
 pub const DependencyMetrics = metric_rules.DependencyMetrics;
 pub const DependencySummary = metric_rules.DependencySummary;
