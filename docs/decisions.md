@@ -878,3 +878,48 @@ Consequence: coupling values remain stable under duplicate imports and projectio
 selectors cannot improve a ratio by hiding neighbors from the denominator, module and slice views
 share the file math, and Zig users are not given class-oriented distance or zone results with an
 unrelated meaning.
+
+### D040 — Custom metrics cross a scalar-only borrowed callback boundary
+
+A custom metric definition has a non-blank name, a non-blank description, a target kind, and a
+calculation hook. The fluent selection clones and owns the name and description. The hook is a small
+type-erased function value with either no context or a caller-owned context pointer. Context storage
+is borrowed: it must outlive the selection and every threshold or predicate rule cloned from that
+selection. ArchUnitZig does not guess how to allocate, clone, or destroy an opaque user context.
+
+Every calculation receives the check allocator and one `CustomMetricInfo` value. Its string slices
+are borrowed only for that invocation. The remaining fields are scalars: target kind, optional
+syntax validity, copied structural counts, optional copied dependency facts, and the number of Zig
+source files contributing to a projected subject. No AST node, token iterator, source buffer,
+project object, or dependency snapshot crosses the callback boundary. A measurement owns its target
+identifier, and a violation additionally owns the metric name and description, so no result retains
+callback input storage.
+
+File custom metrics expose structural counts and the full-project file coupling facts from D039.
+Declaration and container metrics expose their declaration-bound structural counts without
+pretending they have an independent dependency topology. Module and slice metrics accept a public
+`MapFunction`. Internal projected self-edges declare the complete label universe, including
+isolated labels, while all other projected edges provide coupling evidence. The mapper and any
+context it contains are borrowed under the same lifetime rule as calculation callbacks. File
+selectors cannot be applied before an arbitrary projection because a filename/folder/path clause
+does not honestly define a module or slice label; `customMetricForProjection` therefore rejects a
+scope that already has selectors. Projection-specific selection can be added later with an explicit
+label vocabulary.
+
+Calculations return the shared tagged `MetricValue`, preserving signed integers, unsigned integers,
+and floating-point values without converting counts through `f64`. Custom thresholds use the same
+comparison implementation as built-in metrics. Mixed integer/float comparisons remain invalid.
+NaN and infinity are rejected both as calculated values and thresholds because their ordering and
+diagnostic meaning are not architecture facts. A calculation or predicate error aborts the check
+unchanged and cleans up partial results; it is never converted into a violation.
+
+`shouldSatisfy` receives the allocator, calculated value, and the same borrowed subject context. A
+false result produces owned custom-metric evidence whose metric description survives into
+diagnostics; an error remains an analysis error. Empty selections are guarded before either callback
+runs. Repeated checks deliberately re-extract their backing facts and release them after the
+invocation rather than caching borrowed views inside a rule.
+
+Consequence: users can define project-specific metrics at every Zig-relevant subject level without
+unsafe parser lifetimes or a fabricated universal module model, diagnostic output explains the
+meaning of the metric rather than only its name, and custom rules compose with the same lazy,
+allocator-explicit check pipeline as built-in rules.
