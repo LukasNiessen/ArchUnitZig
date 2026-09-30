@@ -15,7 +15,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual("0.16.0", metadata.zig_version)
         self.assertTrue(metadata.archive_url.endswith("/v0.0.2.tar.gz"))
         self.assertEqual(
-            "archunit-0.0.2-7Czg3Jt_GQDfTmFjR1HxQu9QJWMgJxKIe81V-QabeYbO",
+            "archunit-0.0.2-7Czg3E-AGQDSUqSoO1TEnmtB9PqF0BmUrlW825VVuAHz",
             metadata.package_hash,
         )
 

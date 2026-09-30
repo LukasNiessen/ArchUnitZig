@@ -421,7 +421,8 @@ test "inspect a rule with explicit verbosity and highlighted output" {
 
 `writer_color = true` enables cyan debug, green info, yellow warning, and red error records.
 It is opt-in: ordinary writers remain plain by default, and file/structured sinks always remain
-plain. A writer is borrowed only while the operation runs. To save a transcript, set
+plain. A generic writer has no terminal identity: the host supplies terminal and environment
+policy and should leave `writer_color` false for CI, files, redirected output, or `NO_COLOR`. A writer is borrowed only while the operation runs. To save a transcript, set
 `.file = .{ .output_directory = "architecture-logs", .mode = .append }`; the logger creates a
 UTC-timestamped file. Use `.logger` with `LogSink` to route structured events to your application.
 
