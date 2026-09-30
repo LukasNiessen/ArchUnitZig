@@ -147,6 +147,8 @@ pub const LoggingOptions = struct {
     logger: ?LogSink = null,
     file: ?LogFileOptions = null,
     clock: LogClock = .{},
+    /// ANSI severity highlighting for the writer only; files and structured records stay plain.
+    writer_color: bool = false,
     include_progress: bool = true,
     include_violations: bool = true,
     include_metrics: bool = true,

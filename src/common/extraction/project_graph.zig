@@ -130,8 +130,11 @@ fn extractProjectGraphObserved(
     defer cache_key.deinit(allocator);
     if (graph_cache.cloneGraphFromCache(allocator, cache_key) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_get", project.path, error.OutOfMemory);
-    }) |cached| {
+    }) |cached_value| {
+        var cached = cached_value;
+        errdefer cached.deinit(allocator);
         try logger.logCache("cache hit");
+        try logger.logGraph(&cached);
         try logger.logExtraction("project graph extraction completed from cache");
         return cached;
     }
@@ -160,6 +163,7 @@ fn extractProjectGraphObserved(
     graph_cache.storeGraphInCache(cache_key, graph) catch {
         return diagnostics.failTechnical(.out_of_memory, "project_graph.cache_put", project.path, error.OutOfMemory);
     };
+    try logger.logGraph(&graph);
     try logger.logExtraction("project graph extraction completed");
     return graph;
 }
@@ -167,6 +171,7 @@ fn extractProjectGraphObserved(
 const NoopLogger = struct {
     fn logExtraction(_: NoopLogger, _: []const u8) error{}!void {}
     fn logCache(_: NoopLogger, _: []const u8) error{}!void {}
+    fn logGraph(_: NoopLogger, _: anytype) error{}!void {}
 };
 
 fn extractLocatedGraph(

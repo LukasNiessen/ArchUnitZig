@@ -652,6 +652,9 @@ pub const FilesHaveNoCycles = struct {
     ) anyerror!assertion.ViolationList {
         var selected = try self.rule.select(graph);
         defer selected.deinit();
+        if (options.logger) |logger| {
+            for (selected.items()) |subject| try logger.logSubject("selected file", subject);
+        }
         if (try guardRuleSelection(&self.rule, selected.len(), options, "files.have_no_cycles")) |early| return early;
 
         var cycles = try file_cycles.projectSelectedFileCycles(
@@ -737,6 +740,9 @@ pub const FilesMatchPattern = struct {
     ) anyerror!assertion.ViolationList {
         var selected = try self.rule.select(graph);
         defer selected.deinit();
+        if (options.logger) |logger| {
+            for (selected.items()) |subject| try logger.logSubject("selected file", subject);
+        }
         if (try guardRuleSelection(
             &self.rule,
             selected.len(),

@@ -16,6 +16,7 @@ const source_blocks = [_]SourceBlock{
     .{ .id = "metrics-example", .path = "../../../test/readme/metrics.zig" },
     .{ .id = "graph-example", .path = "../../../test/readme/graph.zig" },
     .{ .id = "testing-example", .path = "../../../test/readme/testing.zig" },
+    .{ .id = "logging-example", .path = "../../../test/readme/logging.zig" },
 };
 
 test {
@@ -26,6 +27,7 @@ test {
     _ = @import("readme/metrics.zig");
     _ = @import("readme/graph.zig");
     _ = testing_example;
+    _ = @import("readme/logging.zig");
 }
 
 test "README examples execute from the consumer project" {
@@ -53,7 +55,7 @@ test "every README fence is synchronized with exercised documentation" {
     }
 
     try std.testing.expectEqualStrings(
-        "zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.1.tar.gz",
+        "zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.2.tar.gz",
         try fencedBlock(allocator, readme, "install"),
     );
     var failure = try testing_example.renderedFailure();
@@ -62,8 +64,8 @@ test "every README fence is synchronized with exercised documentation" {
         failure.message,
         try fencedBlock(allocator, readme, "failure-output"),
     );
-    try std.testing.expectEqual(@as(usize, 20), countOccurrences(readme, "```"));
-    try std.testing.expectEqual(@as(usize, 10), countOccurrences(readme, "<!-- readme-test:"));
+    try std.testing.expectEqual(@as(usize, 22), countOccurrences(readme, "```"));
+    try std.testing.expectEqual(@as(usize, 11), countOccurrences(readme, "<!-- readme-test:"));
 }
 
 fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {

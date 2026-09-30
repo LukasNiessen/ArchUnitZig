@@ -3,6 +3,15 @@
 All notable changes to ArchUnitZig are recorded here. Versions follow semantic versioning, while
 the `0.x` series remains explicitly pre-stable.
 
+## [0.0.2] - 2026-09-30
+
+- Add opt-in debug inspection of discovered files, dependency edges, selected files and graph reports.
+- Log passing built-in and custom metric values without re-running callbacks.
+- Add explicit ANSI severity highlighting for writer logs; file and structured records stay plain.
+- Document verbosity, sinks and formatted failures with an executable README example.
+- Preserve quiet defaults, graph/rule results and existing sink-error propagation.
+- Continue to support exactly Zig 0.16.0.
+
 ## [0.0.1] - 2026-08-24
 
 First honest preview release for Zig 0.16.0.
@@ -25,3 +34,5 @@ First honest preview release for Zig 0.16.0.
 - Public APIs are preview quality and may change before a stable release.
 
 [0.0.1]: https://github.com/LukasNiessen/ArchUnitZig/releases/tag/v0.0.1
+
+[0.0.2]: https://github.com/LukasNiessen/ArchUnitZig/releases/tag/v0.0.2

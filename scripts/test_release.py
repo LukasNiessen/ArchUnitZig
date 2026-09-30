@@ -10,12 +10,12 @@ from scripts import release
 
 class ReleaseContractTests(unittest.TestCase):
     def test_repository_release_metadata_is_complete(self) -> None:
-        metadata = release.validate(release.ROOT, release.DEFAULT_METADATA, "v0.0.1")
-        self.assertEqual("0.0.1", metadata.version)
+        metadata = release.validate(release.ROOT, release.DEFAULT_METADATA, "v0.0.2")
+        self.assertEqual("0.0.2", metadata.version)
         self.assertEqual("0.16.0", metadata.zig_version)
-        self.assertTrue(metadata.archive_url.endswith("/v0.0.1.tar.gz"))
+        self.assertTrue(metadata.archive_url.endswith("/v0.0.2.tar.gz"))
         self.assertEqual(
-            "archunit-0.0.1-7Czg3AZHGQBbO-ej1RHt71ZUIRQ9HxG6O6tHl4w0r8LN",
+            "archunit-0.0.2-7Czg3E-AGQDSUqSoO1TEnmtB9PqF0BmUrlW825VVuAHz",
             metadata.package_hash,
         )
 

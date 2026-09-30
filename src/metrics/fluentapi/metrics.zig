@@ -892,6 +892,7 @@ pub const MetricThresholdRule = struct {
         errdefer result.deinit(options.allocator);
         for (measurements.items()) |measurement| {
             const measured = assertion.MetricValue{ .unsigned = @intCast(measurement.value) };
+            if (options.logger) |logger| try logger.logMetric(self.metric.name(), measured, measurement.target_identifier);
             if (try threshold_assertion.passes(measured, self.comparison, threshold_value)) continue;
             var payload = try assertion.MetricViolation.init(
                 options.allocator,
@@ -1225,6 +1226,7 @@ pub const DependencyThresholdRule = struct {
         var result = assertion.ViolationList{};
         errdefer result.deinit(options.allocator);
         for (measurements.items()) |measurement| {
+            if (options.logger) |logger| try logger.logMetric(self.metric.name(), measurement.value, measurement.target_identifier);
             if (try threshold_assertion.passes(measurement.value, self.comparison, self.threshold_value)) continue;
             var payload = try assertion.MetricViolation.init(
                 options.allocator,
@@ -1410,10 +1412,12 @@ pub const MetricPredicateRule = struct {
         defer subjects.deinit(options.allocator);
         try subjects.ensureTotalCapacity(options.allocator, analysis.subjects.items.len);
         for (analysis.subjects.items) |info| {
+            const measured = try self.metric.value(info);
+            if (options.logger) |logger| try logger.logMetric(self.metric.name(), measured, info.identifier);
             subjects.appendAssumeCapacity(.{
                 .info = info,
                 .metric_name = self.metric.name(),
-                .value = try self.metric.value(info),
+                .value = measured,
             });
         }
         return predicate_assertion.gatherMetricPredicateViolations(
@@ -1718,10 +1722,11 @@ pub const CustomMetricThresholdRule = struct {
         if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
             return guarded;
         }
+        const observed = ObservedMetricCalculation{ .definition_value = self.selection.definition(), .logger = options.logger };
         return custom_calculation.gatherThresholdViolations(
             options.allocator,
             analysis.subjects.items,
-            self.selection.definition(),
+            observed.definition(),
             self.comparison,
             self.threshold_value,
         );
@@ -1757,12 +1762,37 @@ pub const CustomMetricPredicateRule = struct {
         if (try guardCustomMetricEmpty(&self.selection, analysis.subjects.items.len, options)) |guarded| {
             return guarded;
         }
+        const observed = ObservedMetricCalculation{ .definition_value = self.selection.definition(), .logger = options.logger };
         return custom_calculation.gatherPredicateViolations(
             options.allocator,
             analysis.subjects.items,
-            self.selection.definition(),
+            observed.definition(),
             self.predicate,
         );
+    }
+};
+
+// This scoped adapter observes the value returned by the original callback exactly once.
+// Pure calculation modules keep their existing callback API and never import logging.
+const ObservedMetricCalculation = struct {
+    definition_value: custom_calculation.CustomMetricDefinition,
+    logger: ?*fluentapi.CheckLogger,
+
+    fn definition(self: *const ObservedMetricCalculation) custom_calculation.CustomMetricDefinition {
+        if (self.logger == null) return self.definition_value;
+        var observed = self.definition_value;
+        observed.calculation = custom_calculation.CustomMetricCalculation.fromContext(
+            ObservedMetricCalculation,
+            self,
+            calculate,
+        );
+        return observed;
+    }
+
+    fn calculate(self: *const ObservedMetricCalculation, allocator: Allocator, info: custom_calculation.CustomMetricInfo) anyerror!assertion.MetricValue {
+        const value = try self.definition_value.calculation.calculate(allocator, info);
+        if (self.logger) |logger| try logger.logMetric(self.definition_value.name, value, info.identifier);
+        return value;
     }
 };
 
@@ -3083,4 +3113,42 @@ test "metrics builder chains release every partial allocation" {
         exerciseBuilderAllocationFailures,
         .{},
     );
+}
+
+test "passing custom metric inspection evaluates calculation and predicate once per check" {
+    const Counts = struct {
+        calculations: *usize,
+        predicates: *usize,
+        fn calculate(self: *const @This(), _: Allocator, _: custom_calculation.CustomMetricInfo) !assertion.MetricValue {
+            self.calculations.* += 1;
+            return .{ .unsigned = 7 };
+        }
+        fn predicate(self: *const @This(), _: Allocator, value: assertion.MetricValue, _: custom_calculation.CustomMetricInfo) !bool {
+            self.predicates.* += 1;
+            return value.unsigned == 7;
+        }
+    };
+    var calculations: usize = 0;
+    var predicates: usize = 0;
+    const counts = Counts{ .calculations = &calculations, .predicates = &predicates };
+    var root = try metrics(std.testing.allocator, .{ .locator = "test/fixtures/metrics-structural" });
+    defer root.deinit();
+    var selected = try root.inFile(&.{"src/root.zig"});
+    defer selected.deinit();
+    var custom = try selected.customMetric("inspection", "Observed once", custom_calculation.CustomMetricCalculation.fromContext(Counts, &counts, Counts.calculate));
+    defer custom.deinit();
+    var rule = try custom.shouldSatisfy(custom_calculation.CustomMetricPredicate.fromContext(Counts, &counts, Counts.predicate));
+    defer rule.deinit(std.testing.allocator);
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    var quiet = try rule.check(options);
+    defer quiet.deinit(std.testing.allocator);
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    options.logging = .{ .level = .debug, .writer = &output.writer };
+    var logged = try rule.check(options);
+    defer logged.deinit(std.testing.allocator);
+    try std.testing.expect(quiet.passes() and logged.passes());
+    try std.testing.expectEqual(@as(usize, 2), calculations);
+    try std.testing.expectEqual(@as(usize, 2), predicates);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "[metric] name=inspection value=7 subject=src/root.zig") != null);
 }
