@@ -6,19 +6,19 @@ ArchUnitZig turns a Zig project into a dependency graph and lets you enforce arc
 ordinary `zig test` tests. Rules are lazy values: constructing a fluent chain performs no I/O;
 checking it returns structured violations or integrates with Zig's test runner.
 
-The `v0.0.1` preview targets exactly Zig 0.16.0. Its public surface ships file rules,
+The `v0.0.2` preview targets exactly Zig 0.16.0. Its public surface ships file rules,
 named layers, slices and PlantUML diagrams, Zig-native metrics, graph reports, native test helpers,
 explicit per-check logging, and low-level extraction/projection data.
 
 ## Install
 
-Use the immutable `v0.0.1` archive rather than a mutable branch. The canonical Zig package hash,
+Use the immutable `v0.0.2` archive rather than a mutable branch. The canonical Zig package hash,
 copy-paste `build.zig.zon` dependency, release limitations, and rollback procedure are recorded in
-the [version-specific release record](release/v0.0.1.md).
+the [version-specific release record](release/v0.0.2.md).
 
 <!-- readme-test:install -->
 ```console
-zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.1.tar.gz
+zig fetch --save-exact=archunit https://github.com/LukasNiessen/ArchUnitZig/archive/refs/tags/v0.0.2.tar.gz
 ```
 
 The explicit `--save=archunit` name is the key used by `b.dependency` below. Add an architecture
@@ -358,7 +358,7 @@ resolved package identities, canonical paths, manifest fingerprints, and ignore 
 | Area | Current contract |
 | --- | --- |
 | Zig version | Exactly Zig 0.16.x APIs are targeted; other Zig versions are not supported until explicitly tested. |
-| Releases | `v0.0.1` is an immutable preview, not a stable compatibility promise; pin its archive URL and package hash. |
+| Releases | `v0.0.2` is an immutable preview, not a stable compatibility promise; pin its archive URL and package hash. |
 | Build discovery | ArchUnitZig does not execute or claim to understand arbitrary `build.zig`; named modules need explicit compilation-unit mappings. |
 | Dynamic dependencies | Only literal `@import`, `@embedFile`, and `@cInclude` operands are dependency facts. Non-literal operands are parser diagnostics, not guessed names. |
 | Package internals | Package-origin modules remain external. ArchUnitZig does not recursively analyze fetched dependency source as part of the current project. |
@@ -379,6 +379,57 @@ cache key.
 Logging is disabled by default. A check can borrow an ordinary writer, structured `LogSink`, and/or
 file sink with explicit output directory and prefix. Levels are `debug`, `info`, `warn`, and
 `.@"error"`; logging failures propagate, and no process-global stdout/stderr logger is configured.
+
+### Detailed inspection and highlighted output
+
+Choose `debug` for the fullest inspection: cache decisions, discovered files and dependencies,
+selected files, graph report nodes and edges, and measured built-in and custom metric values,
+including passing subjects. Higher levels keep the transcript compact: `info` shows lifecycle,
+extraction and exports, `warn` shows violations, and `.@"error"` shows failed operations.
+`include_progress`, `include_metrics`, and `include_violations` independently filter event families.
+Inspection uses existing results and calls each custom calculation/predicate only once.
+
+<!-- readme-test:logging-example -->
+```zig
+const std = @import("std");
+const archunit = @import("archunit");
+
+test "inspect a rule with explicit verbosity and highlighted output" {
+    var files = try archunit.files(std.testing.allocator, .{});
+    defer files.deinit();
+    var service = try files.inFile(&.{"src/service/root.zig"});
+    defer service.deinit();
+    var should = try service.should();
+    defer should.deinit();
+    var rule = try should.haveName(.{ .glob = "root.zig" });
+    defer rule.deinit(std.testing.allocator);
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    var options = archunit.CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.logging = .{
+        .level = .debug,
+        .writer = &output.writer,
+        .writer_color = true,
+    };
+    var violations = try rule.check(options);
+    defer violations.deinit(std.testing.allocator);
+    try std.testing.expect(violations.passes());
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "selected file: src/service/root.zig") != null);
+}
+```
+
+`writer_color = true` enables cyan debug, green info, yellow warning, and red error records.
+It is opt-in: ordinary writers remain plain by default, and file/structured sinks always remain
+plain. A writer is borrowed only while the operation runs. To save a transcript, set
+`.file = .{ .output_directory = "architecture-logs", .mode = .append }`; the logger creates a
+UTC-timestamped file. Use `.logger` with `LogSink` to route structured events to your application.
+
+The numbered failure formatter above includes selectors, source locations, dependency evidence,
+cycles and metric values. Set its `.color.mode` to `.always` for highlighted failures, `.never`
+for plain CI text, or `.auto` with an explicit terminal context. Log verbosity and failure
+formatting are independent and do not change the returned violations. Configured sink errors
+continue to propagate; logging is disabled unless explicitly requested.
 
 Architecture disagreements are data-only `Violation` values. Invalid selectors/options are user
 errors, while parsing, allocation, I/O, and violated internal invariants are technical errors with

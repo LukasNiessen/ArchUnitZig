@@ -258,7 +258,17 @@ pub const ProjectGraphBuilder = struct {
             options.logger,
         );
         defer graph.deinit(options.allocator);
-        return snapshot_factory.createSnapshot(options.allocator, &graph, self.queryOptions());
+        var snapshot_value = try snapshot_factory.createSnapshot(options.allocator, &graph, self.queryOptions());
+        errdefer snapshot_value.deinit(options.allocator);
+        if (options.logger) |logger| {
+            try logger.logCount("report nodes", snapshot_value.nodes.len);
+            try logger.logCount("report edges", snapshot_value.edges.len);
+            if (logger.inspectsProgress()) {
+                for (snapshot_value.nodes) |node| try logger.logSubject("report node", node.label);
+                for (snapshot_value.edges) |edge| try logger.logDependency(edge.source, edge.target, edge.external);
+            }
+        }
+        return snapshot_value;
     }
 
     pub fn summary(
@@ -825,4 +835,42 @@ test "real fixture fluent render and export terminals share the snapshot contrac
     const expected = try titled_builder.toHtml(options);
     defer std.testing.allocator.free(expected);
     try std.testing.expectEqualStrings(expected, exported);
+}
+
+test "debug inspection preserves graph snapshots on fresh and cached extraction" {
+    var builder = try projectGraph(std.testing.allocator, .{ .locator = "test/fixtures/graph-basic" });
+    defer builder.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.clear_cache = true;
+    const quiet = try builder.toJson(options);
+    defer std.testing.allocator.free(quiet);
+    for ([_]bool{ true, false }) |clear| {
+        var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+        defer output.deinit();
+        options.clear_cache = clear;
+        options.logging = .{ .level = .debug, .writer = &output.writer };
+        const logged = try builder.toJson(options);
+        defer std.testing.allocator.free(logged);
+        try std.testing.expectEqualStrings(quiet, logged);
+        for ([_][]const u8{ "discovered file: src/app/main.zig", "dependency: src/app/main.zig ->", "report nodes=", "report node:" }) |detail| {
+            try std.testing.expect(std.mem.indexOf(u8, output.written(), detail) != null);
+        }
+        try std.testing.expect(std.mem.indexOf(u8, output.written(), if (clear) "cache miss" else "cache hit") != null);
+    }
+}
+
+test "inspection sink failures clean up fresh and cached graph ownership" {
+    const FailInspection = struct {
+        fn write(record: fluentapi.LogRecord) !void {
+            if (std.mem.startsWith(u8, record.message, "extracted edges=")) return error.InspectionSinkFailed;
+        }
+    };
+    var builder = try projectGraph(std.testing.allocator, .{ .locator = "test/fixtures/graph-basic" });
+    defer builder.deinit();
+    var options = CheckOptions.init(std.testing.allocator, std.testing.io);
+    options.logging = .{ .level = .debug, .logger = fluentapi.LogSink.fromStateless(FailInspection.write) };
+    for ([_]bool{ true, false }) |clear| {
+        options.clear_cache = clear;
+        try std.testing.expectError(error.InspectionSinkFailed, builder.snapshot(options));
+    }
 }

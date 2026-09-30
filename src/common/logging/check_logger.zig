@@ -74,6 +74,38 @@ pub const CheckLogger = struct {
         return self.emit(.debug, .cache, "{s}", .{message});
     }
 
+    /// Detailed inspection is opt-in and avoids formatting/iteration at higher levels.
+    pub fn inspectsProgress(self: *const CheckLogger) bool {
+        return self.options.include_progress and self.options.level == .debug;
+    }
+
+    pub fn logSubject(self: *CheckLogger, stage: []const u8, subject: []const u8) anyerror!void {
+        if (!self.inspectsProgress()) return;
+        try self.emit(.debug, .extraction, "{s}: {s}", .{ stage, safeSubject(subject) });
+    }
+
+    pub fn logCount(self: *CheckLogger, stage: []const u8, count: usize) anyerror!void {
+        if (!self.inspectsProgress()) return;
+        try self.emit(.debug, .extraction, "{s}={d}", .{ stage, count });
+    }
+
+    pub fn logDependency(self: *CheckLogger, source: []const u8, target: []const u8, external: bool) anyerror!void {
+        if (!self.inspectsProgress()) return;
+        try self.emit(.debug, .extraction, "dependency: {s} -> {s}; external={}", .{ safeSubject(source), safeSubject(target), external });
+    }
+
+    pub fn logGraph(self: *CheckLogger, graph: anytype) anyerror!void {
+        if (!self.inspectsProgress()) return;
+        try self.logCount("extracted edges", graph.items().len);
+        for (graph.items()) |edge| {
+            if (std.mem.eql(u8, edge.source, edge.target)) {
+                try self.logSubject("discovered file", edge.source);
+            } else {
+                try self.logDependency(edge.source, edge.target, edge.external);
+            }
+        }
+    }
+
     pub fn logViolation(self: *CheckLogger, violation: assertion.Violation) anyerror!void {
         if (!self.options.include_violations) return;
         try self.emit(.warn, .violation, "kind={s}", .{@tagName(violation.kind())});
@@ -151,7 +183,16 @@ pub const CheckLogger = struct {
             .message = safe_message,
         };
         if (self.options.logger) |sink| try sink.write(record);
-        if (self.options.writer) |writer| try writer.writeAll(line);
+        if (self.options.writer) |writer| {
+            if (self.options.writer_color) try writer.writeAll(switch (level) {
+                .debug => "\x1b[36m",
+                .info => "\x1b[32m",
+                .warn => "\x1b[33m",
+                .@"error" => "\x1b[31m",
+            });
+            try writer.writeAll(line);
+            if (self.options.writer_color) try writer.writeAll("\x1b[0m");
+        }
         if (self.options.file != null) try self.writeFile(timestamp, line);
     }
 
@@ -606,4 +647,28 @@ test "logger rendering cleans up every allocation failure" {
         exerciseAllocationFailures,
         .{},
     );
+}
+
+test "ANSI writer highlighting leaves structured records plain and inspection respects level" {
+    const PlainSink = struct {
+        fn write(record: LogRecord) !void {
+            try std.testing.expect(std.mem.indexOfScalar(u8, record.message, 0x1b) == null);
+        }
+    };
+    for ([_]LogLevel{ .debug, .info }) |level| {
+        var output: Io.Writer.Allocating = .init(std.testing.allocator);
+        defer output.deinit();
+        var logger = try CheckLogger.init(std.testing.allocator, std.testing.io, .{
+            .level = level,
+            .writer = &output.writer,
+            .writer_color = true,
+            .logger = LogSink.fromStateless(PlainSink.write),
+        });
+        defer logger.deinit();
+        try logger.startCheck("color");
+        try logger.logSubject("selected file", "src/example.zig");
+        try std.testing.expect(std.mem.indexOf(u8, output.written(), "\x1b[32m") != null);
+        try std.testing.expectEqual(level == .debug, std.mem.indexOf(u8, output.written(), "selected file: src/example.zig") != null);
+        try std.testing.expect(std.mem.endsWith(u8, output.written(), "\x1b[0m"));
+    }
 }

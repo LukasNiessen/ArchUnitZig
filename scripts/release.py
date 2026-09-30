@@ -14,7 +14,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_METADATA = ROOT / "release" / "v0.0.1.json"
+DEFAULT_METADATA = ROOT / "release" / "v0.0.2.json"
 REPOSITORY = "LukasNiessen/ArchUnitZig"
 
 
@@ -63,9 +63,9 @@ def validate(root: Path, metadata_path: Path, expected_tag: str | None = None) -
     if re.fullmatch(hash_pattern, metadata.package_hash) is None:
         errors.append("package_hash is not a canonical Zig package hash for this name/version")
     if metadata.zig_version != "0.16.0":
-        errors.append("v0.0.1 supports exactly Zig 0.16.0")
+        errors.append("v0.0.2 supports exactly Zig 0.16.0")
     if metadata.license != "MIT":
-        errors.append("v0.0.1 package license must be MIT")
+        errors.append("v0.0.2 package license must be MIT")
 
     zon = (root / "build.zig.zon").read_text(encoding="utf-8")
     for value in (
@@ -81,7 +81,7 @@ def validate(root: Path, metadata_path: Path, expected_tag: str | None = None) -
 
     readme = (root / "README.md").read_text(encoding="utf-8")
     require(readme, metadata.archive_url, errors, "README.md")
-    require(readme, "release/v0.0.1.md", errors, "README.md")
+    require(readme, metadata.release_notes, errors, "README.md")
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     require(changelog, f"## [{metadata.version}]", errors, "CHANGELOG.md")
     require(changelog, metadata.zig_version, errors, "CHANGELOG.md")
